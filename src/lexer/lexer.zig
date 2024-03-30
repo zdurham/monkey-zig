@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const Token = union(enum) { ILLEGAL, EOF, IDENT: []const u8, INT: []const u8, ASSIGN, PLUS, COMMA, SEMICOLON, LPAREN, RPAREN, LBRACE, RBRACE, FUNCTION, LET };
+const Token = union(enum) { ILLEGAL, EOF, IDENT: []const u8, INT: []const u8, ASSIGN, PLUS, COMMA, SEMICOLON, LPAREN, RPAREN, LBRACE, RBRACE, FUNCTION, LET, MINUS, BANG, ASTERISK, SLASH, GT, LT, TRUE, FALSE, ELSE, IF, RETURN, EQ, NOT_EQ };
 
 fn isLetter(ch: u8) bool {
     return std.ascii.isAlphabetic(ch) or ch == '_';
@@ -39,7 +39,14 @@ pub const Lexer = struct {
     pub fn nextToken(self: *Self) Token {
         self.skipWhitespace();
         const token: Token = switch (self.ch) {
-            '=' => .ASSIGN,
+            '=' => blk: {
+                if (self.peekChar() == '=') {
+                    self.readChar();
+                    break :blk .EQ;
+                } else {
+                    break :blk .ASSIGN;
+                }
+            },
             ';' => .SEMICOLON,
             '(' => .LPAREN,
             ')' => .RPAREN,
@@ -47,7 +54,19 @@ pub const Lexer = struct {
             '+' => .PLUS,
             '{' => .LBRACE,
             '}' => .RBRACE,
-            0 => .EOF,
+            '/' => .SLASH,
+            '!' => blk: {
+                if (self.peekChar() == '=') {
+                    self.readChar();
+                    break :blk .NOT_EQ;
+                } else {
+                    break :blk .BANG;
+                }
+            },
+            '-' => .MINUS,
+            '>' => .GT,
+            '<' => .LT,
+            '*' => .ASTERISK,
             'a'...'z', 'A'...'Z', '_' => {
                 const ident = self.readIdentifier();
                 if (self.lookupKeyword(ident)) |token| {
@@ -59,6 +78,7 @@ pub const Lexer = struct {
                 const int = self.readDigit();
                 return .{ .INT = int };
             },
+            0 => .EOF,
             else => return .ILLEGAL,
         };
 
@@ -71,8 +91,21 @@ pub const Lexer = struct {
         const map = std.ComptimeStringMap(Token, .{
             .{ "let", .LET },
             .{ "fn", .FUNCTION },
+            .{ "return", .RETURN },
+            .{ "if", .IF },
+            .{ "else", .ELSE },
+            .{ "true", .TRUE },
+            .{ "false", .FALSE },
         });
         return map.get(ident);
+    }
+
+    fn peekChar(self: *Self) u8 {
+        if (self.readPosition >= self.input.len) {
+            return 0;
+        } else {
+            return self.input[self.readPosition];
+        }
     }
 
     fn readIdentifier(self: *Self) []const u8 {
@@ -98,9 +131,7 @@ pub const Lexer = struct {
     }
 };
 
-// TODO: turn multi line strings INTo files
-// that we can test via reading monkey.ml files
-test "Test next_token" {
+test "Test all syntax" {
     const input =
         \\let five = 5;
         \\let ten = 10;
@@ -110,10 +141,19 @@ test "Test next_token" {
         \\};
         \\
         \\let result = add(five, ten);
+        \\!-/*5;
+        \\5 < 10 > 5;
+        \\
+        \\if (5 < 10) {
+        \\   return true;
+        \\} else {
+        \\    return false;
+        \\}
+        \\10 == 10;
+        \\10 != 9;
     ;
-    const expectedTokens = [_]Token{ .LET, .{ .IDENT = "five" }, .ASSIGN, .{ .INT = "5" }, .SEMICOLON, .LET, .{ .IDENT = "ten" }, .ASSIGN, .{ .INT = "10" }, .SEMICOLON, .LET, .{ .IDENT = "add" }, .ASSIGN, .FUNCTION, .LPAREN, .{ .IDENT = "x" }, .COMMA, .{ .IDENT = "y" }, .RPAREN, .LBRACE, .{ .IDENT = "x" }, .PLUS, .{ .IDENT = "y" }, .SEMICOLON, .RBRACE, .SEMICOLON, .LET, .{ .IDENT = "result" }, .ASSIGN, .{ .IDENT = "add" }, .LPAREN, .{ .IDENT = "five" }, .COMMA, .{ .IDENT = "ten" }, .RPAREN, .SEMICOLON, .EOF };
+    const expectedTokens = [_]Token{ .LET, .{ .IDENT = "five" }, .ASSIGN, .{ .INT = "5" }, .SEMICOLON, .LET, .{ .IDENT = "ten" }, .ASSIGN, .{ .INT = "10" }, .SEMICOLON, .LET, .{ .IDENT = "add" }, .ASSIGN, .FUNCTION, .LPAREN, .{ .IDENT = "x" }, .COMMA, .{ .IDENT = "y" }, .RPAREN, .LBRACE, .{ .IDENT = "x" }, .PLUS, .{ .IDENT = "y" }, .SEMICOLON, .RBRACE, .SEMICOLON, .LET, .{ .IDENT = "result" }, .ASSIGN, .{ .IDENT = "add" }, .LPAREN, .{ .IDENT = "five" }, .COMMA, .{ .IDENT = "ten" }, .RPAREN, .SEMICOLON, .BANG, .MINUS, .SLASH, .ASTERISK, .{ .INT = "5" }, .SEMICOLON, .{ .INT = "5" }, .LT, .{ .INT = "10" }, .GT, .{ .INT = "5" }, .SEMICOLON, .IF, .LPAREN, .{ .INT = "5" }, .LT, .{ .INT = "10" }, .RPAREN, .LBRACE, .RETURN, .TRUE, .SEMICOLON, .RBRACE, .ELSE, .LBRACE, .RETURN, .FALSE, .SEMICOLON, .RBRACE, .{ .INT = "10" }, .EQ, .{ .INT = "10" }, .SEMICOLON, .{ .INT = "10" }, .NOT_EQ, .{ .INT = "9" }, .SEMICOLON, .EOF };
 
-    std.log.warn("\n{s}\n", .{input});
     var lexer = Lexer.init(input);
     for (expectedTokens) |token| {
         const tokenFromLexer = lexer.nextToken();

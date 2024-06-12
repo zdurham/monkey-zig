@@ -116,7 +116,7 @@ pub const Lexer = struct {
 
     fn lookupKeyword(self: *Self, ident: []const u8) ?Token {
         _ = self;
-        const map = std.ComptimeStringMap(Token, .{
+        const map = std.StaticStringMap(Token).initComptime(.{
             .{ "let", .LET },
             .{ "fn", .FUNCTION },
             .{ "return", .RETURN },

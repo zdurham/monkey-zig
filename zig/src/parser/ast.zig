@@ -21,10 +21,21 @@ const LetStatement = struct {
 //     pub fn tokenLiteral() void {}
 // };
 
-const Statement = struct {
-    pub fn tokenLiteral() []const u8 {}
-    pub fn statementNode() void {}
-};
+
+pub const Statement = union(enum) {
+
+    pub fn tokenLiteral(self: *Self) []const u8 {
+        switch(self) {
+
+        }
+    }
+}
+
+
+// pub const Statement = struct {
+//     pub fn tokenLiteral() []const u8 {}
+//     pub fn statementNode() void {}
+// };
 
 const Expression = struct {
     pub fn tokenLiteral() []const u8 {}

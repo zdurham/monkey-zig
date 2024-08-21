@@ -1,5 +1,6 @@
-use std::{collections::HashMap, str};
+use std::str;
 
+#[derive(Debug, PartialEq)]
 pub enum Token {
     ILLEGAL,
     EOF,
@@ -39,12 +40,13 @@ pub struct Lexer {
 
 impl Lexer {
     fn init(input: String) -> Lexer {
-        let lexer = Lexer {
+        let mut lexer = Lexer {
             input: input.into_bytes(),
             position: 0,
             read_position: 0,
             ch: 0,
         };
+        lexer.read_char();
         return lexer;
     }
 
@@ -59,7 +61,10 @@ impl Lexer {
     }
 
     fn skip_whitespace(&mut self) {
-        while self.ch == b'\r' || self.ch == b' ' || self.ch == b'\n' || self.ch == b'\t' {
+        println!("{:?}", self.input);
+        println!("inside skip whitespace: {}", self.ch);
+        while self.ch.is_ascii_whitespace() {
+            println!("skipping {}", self.ch);
             self.read_char();
         }
     }
@@ -112,6 +117,7 @@ impl Lexer {
             _ => Token::ILLEGAL,
         };
 
+        self.read_char();
         return token;
     }
 
@@ -133,7 +139,7 @@ impl Lexer {
 
     fn read_identifier(&mut self) -> &str {
         let initial_position = self.position;
-        while self.ch.is_ascii_alphabetic() {
+        while self.ch.is_ascii_alphabetic() || self.ch == b'_' {
             self.read_char()
         }
         // cursed?
@@ -164,5 +170,113 @@ mod tests {
         assert_eq!(lexer.position, 0);
         assert_eq!(lexer.read_position, 1);
         assert_eq!(lexer.ch, b'o');
+    }
+
+    #[test]
+    fn test_all_syntax() {
+        let input = r#"
+            let five = 5;
+            let ten = 10;
+
+            let add = fn(x, y) {
+                x + y;
+            };
+
+            let result = add(five, ten);
+            !-/*5
+            5 < 10 > 5;
+
+            if (5 < 10) {
+                return true;
+            } else {
+                return false;
+            }
+
+            10 == 10;
+            10 != 9;
+        "#;
+        let expected_tokens = vec![
+            Token::LET,
+            Token::IDENT(String::from("five")),
+            Token::ASSIGN,
+            Token::INT(String::from("5")),
+            Token::SEMICOLON,
+            Token::LET,
+            Token::IDENT(String::from("ten")),
+            Token::ASSIGN,
+            Token::IDENT(String::from("10")),
+            Token::SEMICOLON,
+            Token::LET,
+            Token::IDENT(String::from("add")),
+            Token::ASSIGN,
+            Token::FUNCTION,
+            Token::LPAREN,
+            Token::IDENT(String::from("x")),
+            Token::COMMA,
+            Token::IDENT(String::from("y")),
+            Token::RPAREN,
+            Token::LBRACE,
+            Token::IDENT(String::from("x")),
+            Token::PLUS,
+            Token::IDENT(String::from("y")),
+            Token::SEMICOLON,
+            Token::RBRACE,
+            Token::SEMICOLON,
+            Token::LET,
+            Token::IDENT(String::from("result")),
+            Token::ASSIGN,
+            Token::IDENT(String::from("add")),
+            Token::LPAREN,
+            Token::IDENT(String::from("five")),
+            Token::COMMA,
+            Token::IDENT(String::from("ten")),
+            Token::RPAREN,
+            Token::SEMICOLON,
+            Token::BANG,
+            Token::MINUS,
+            Token::SLASH,
+            Token::ASTERISK,
+            Token::INT("5".into()),
+            Token::SEMICOLON,
+            Token::INT("5".into()),
+            Token::LT,
+            Token::INT("10".into()),
+            Token::GT,
+            Token::INT("5".into()),
+            Token::SEMICOLON,
+            Token::IF,
+            Token::LPAREN,
+            Token::INT("5".into()),
+            Token::LT,
+            Token::INT("10".into()),
+            Token::RPAREN,
+            Token::RETURN,
+            Token::TRUE,
+            Token::SEMICOLON,
+            Token::RBRACE,
+            Token::ELSE,
+            Token::LBRACE,
+            Token::RETURN,
+            Token::FALSE,
+            Token::SEMICOLON,
+            Token::RBRACE,
+            Token::INT("10".into()),
+            Token::EQ,
+            Token::INT("10".into()),
+            Token::SEMICOLON,
+            Token::INT("10".into()),
+            Token::NOT_EQ,
+            Token::INT("9".into()),
+            Token::SEMICOLON,
+            Token::EOF,
+        ];
+
+        let mut lexer = Lexer::init(input.into());
+        for token in expected_tokens.iter() {
+            let token_from_lexer = lexer.next_token();
+            println!("{:?}", token_from_lexer);
+            println!("token: {:?}", token);
+            debug_assert_eq!(&token_from_lexer, token);
+        }
     }
 }

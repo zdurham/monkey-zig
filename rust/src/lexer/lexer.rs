@@ -39,9 +39,9 @@ pub struct Lexer {
 }
 
 impl Lexer {
-    fn init(input: String) -> Lexer {
+    pub fn init(input: &str) -> Lexer {
         let mut lexer = Lexer {
-            input: input.into_bytes(),
+            input: input.as_bytes().to_vec(),
             position: 0,
             read_position: 0,
             ch: 0,

@@ -21,16 +21,12 @@ const LetStatement = struct {
 //     pub fn tokenLiteral() void {}
 // };
 
-
 pub const Statement = union(enum) {
-
+    const Self = @This();
     pub fn tokenLiteral(self: *Self) []const u8 {
-        switch(self) {
-
-        }
+        _ = self;
     }
-}
-
+};
 
 // pub const Statement = struct {
 //     pub fn tokenLiteral() []const u8 {}

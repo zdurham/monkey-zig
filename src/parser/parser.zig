@@ -44,7 +44,7 @@ const Parser = struct {
     }
 
     fn parseLetStatement(self: *Self) ast.LetStatement {
-        const stmt = ast.LetStatement{}
+        const stmt = ast.LetStatement{};
     }
 
     fn nextToken(self: *Self) void {

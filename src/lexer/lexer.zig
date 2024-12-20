@@ -1,10 +1,10 @@
 const std = @import("std");
 
-pub const Token = union(enum) {
+pub const TokenType = enum {
     ILLEGAL,
     EOF,
-    IDENT: []const u8,
-    INT: []const u8,
+    IDENT,
+    INT,
     ASSIGN,
     PLUS,
     COMMA,
@@ -28,6 +28,19 @@ pub const Token = union(enum) {
     RETURN,
     EQ,
     NOT_EQ,
+};
+
+pub const Token = struct {
+    const Self = @This();
+    kind: TokenType,
+    literal: []const u8,
+
+    pub fn new(kind: TokenType, literal: []const u8) Self {
+        return Self{
+            .kind = kind,
+            .literal = literal,
+        };
+    }
 };
 
 fn isLetter(ch: u8) bool {
@@ -70,44 +83,44 @@ pub const Lexer = struct {
             '=' => blk: {
                 if (self.peekChar() == '=') {
                     self.readChar();
-                    break :blk .EQ;
+                    break :blk Token.new(.EQ, "==");
                 } else {
-                    break :blk .ASSIGN;
+                    break :blk Token.new(.ASSIGN, "=");
                 }
             },
-            ';' => .SEMICOLON,
-            '(' => .LPAREN,
-            ')' => .RPAREN,
-            ',' => .COMMA,
-            '+' => .PLUS,
-            '{' => .LBRACE,
-            '}' => .RBRACE,
-            '/' => .SLASH,
+            ';' => Token.new(.SEMICOLON, ";"),
+            '(' => Token.new(.LPAREN, "("),
+            ')' => Token.new(.RPAREN, ")"),
+            ',' => Token.new(.COMMA, ","),
+            '+' => Token.new(.PLUS, "+"),
+            '{' => Token.new(.LBRACE, "{"),
+            '}' => Token.new(.RBRACE, "}"),
+            '/' => Token.new(.SLASH, "/"),
             '!' => blk: {
                 if (self.peekChar() == '=') {
                     self.readChar();
-                    break :blk .NOT_EQ;
+                    break :blk Token.new(.NOT_EQ, "!=");
                 } else {
-                    break :blk .BANG;
+                    break :blk Token.new(.BANG, "!");
                 }
             },
-            '-' => .MINUS,
-            '>' => .GT,
-            '<' => .LT,
-            '*' => .ASTERISK,
+            '-' => Token.new(.MINUS, "-"),
+            '>' => Token.new(.GT, ">"),
+            '<' => Token.new(.LT, "<"),
+            '*' => Token.new(.ASTERISK, "*"),
             'a'...'z', 'A'...'Z', '_' => {
                 const ident = self.readIdentifier();
                 if (self.lookupKeyword(ident)) |token| {
                     return token;
                 }
-                return .{ .IDENT = ident };
+                return Token.new(.IDENT, ident);
             },
             '0'...'9' => {
                 const int = self.readDigit();
-                return .{ .INT = int };
+                return Token.new(.INT, int);
             },
-            0 => .EOF,
-            else => return .ILLEGAL,
+            0 => Token.new(.EOF, ""),
+            else => return Token.new(.ILLEGAL, ""),
         };
 
         self.readChar();
@@ -117,13 +130,13 @@ pub const Lexer = struct {
     fn lookupKeyword(self: *Self, ident: []const u8) ?Token {
         _ = self;
         const map = std.StaticStringMap(Token).initComptime(.{
-            .{ "let", .LET },
-            .{ "fn", .FUNCTION },
-            .{ "return", .RETURN },
-            .{ "if", .IF },
-            .{ "else", .ELSE },
-            .{ "true", .TRUE },
-            .{ "false", .FALSE },
+            .{ "let", Token.new(.LET, "let") },
+            .{ "fn", Token.new(.FUNCTION, "fn") },
+            .{ "return", Token.new(.RETURN, "return") },
+            .{ "if", Token.new(.IF, "if") },
+            .{ "else", Token.new(.ELSE, "else") },
+            .{ "true", Token.new(.TRUE, "true") },
+            .{ "false", Token.new(.FALSE, "false") },
         });
         return map.get(ident);
     }
@@ -181,85 +194,86 @@ test "Test all syntax" {
         \\10 != 9;
     ;
     const expectedTokens = [_]Token{
-        .LET,
-        .{ .IDENT = "five" },
-        .ASSIGN,
-        .{ .INT = "5" },
-        .SEMICOLON,
-        .LET,
-        .{ .IDENT = "ten" },
-        .ASSIGN,
-        .{ .INT = "10" },
-        .SEMICOLON,
-        .LET,
-        .{ .IDENT = "add" },
-        .ASSIGN,
-        .FUNCTION,
-        .LPAREN,
-        .{ .IDENT = "x" },
-        .COMMA,
-        .{ .IDENT = "y" },
-        .RPAREN,
-        .LBRACE,
-        .{ .IDENT = "x" },
-        .PLUS,
-        .{ .IDENT = "y" },
-        .SEMICOLON,
-        .RBRACE,
-        .SEMICOLON,
-        .LET,
-        .{ .IDENT = "result" },
-        .ASSIGN,
-        .{ .IDENT = "add" },
-        .LPAREN,
-        .{ .IDENT = "five" },
-        .COMMA,
-        .{ .IDENT = "ten" },
-        .RPAREN,
-        .SEMICOLON,
-        .BANG,
-        .MINUS,
-        .SLASH,
-        .ASTERISK,
-        .{ .INT = "5" },
-        .SEMICOLON,
-        .{ .INT = "5" },
-        .LT,
-        .{ .INT = "10" },
-        .GT,
-        .{ .INT = "5" },
-        .SEMICOLON,
-        .IF,
-        .LPAREN,
-        .{ .INT = "5" },
-        .LT,
-        .{ .INT = "10" },
-        .RPAREN,
-        .LBRACE,
-        .RETURN,
-        .TRUE,
-        .SEMICOLON,
-        .RBRACE,
-        .ELSE,
-        .LBRACE,
-        .RETURN,
-        .FALSE,
-        .SEMICOLON,
-        .RBRACE,
-        .{ .INT = "10" },
-        .EQ,
-        .{ .INT = "10" },
-        .SEMICOLON,
-        .{ .INT = "10" },
-        .NOT_EQ,
-        .{ .INT = "9" },
-        .SEMICOLON,
-        .EOF,
+        Token.new(.LET, "let"),
+        Token.new(.IDENT, "five"),
+        Token.new(.ASSIGN, "="),
+        Token.new(.INT, "5"),
+        Token.new(.SEMICOLON, ";"),
+        Token.new(.LET, "let"),
+        Token.new(.IDENT, "ten"),
+        Token.new(.ASSIGN, "="),
+        Token.new(.INT, "10"),
+        Token.new(.SEMICOLON, ";"),
+        Token.new(.LET, "let"),
+        Token.new(.IDENT, "add"),
+        Token.new(.ASSIGN, "="),
+        Token.new(.FUNCTION, "fn"),
+        Token.new(.LPAREN, "("),
+        Token.new(.IDENT, "x"),
+        Token.new(.COMMA, ","),
+        Token.new(.IDENT, "y"),
+        Token.new(.RPAREN, ")"),
+        Token.new(.LBRACE, "{"),
+        Token.new(.IDENT, "x"),
+        Token.new(.PLUS, "+"),
+        Token.new(.IDENT, "y"),
+        Token.new(.SEMICOLON, ";"),
+        Token.new(.RBRACE, "}"),
+        Token.new(.SEMICOLON, ";"),
+        Token.new(.LET, "let"),
+        Token.new(.IDENT, "result"),
+        Token.new(.ASSIGN, "="),
+        Token.new(.IDENT, "add"),
+        Token.new(.LPAREN, "("),
+        Token.new(.IDENT, "five"),
+        Token.new(.COMMA, ","),
+        Token.new(.IDENT, "ten"),
+        Token.new(.RPAREN, ")"),
+        Token.new(.SEMICOLON, ";"),
+        Token.new(.BANG, "!"),
+        Token.new(.MINUS, "-"),
+        Token.new(.SLASH, "/"),
+        Token.new(.ASTERISK, "*"),
+        Token.new(.INT, "5"),
+        Token.new(.SEMICOLON, ";"),
+        Token.new(.INT, "5"),
+        Token.new(.LT, "<"),
+        Token.new(.INT, "10"),
+        Token.new(.GT, ">"),
+        Token.new(.INT, "5"),
+        Token.new(.SEMICOLON, ";"),
+        Token.new(.IF, "if"),
+        Token.new(.LPAREN, "("),
+        Token.new(.INT, "5"),
+        Token.new(.LT, "<"),
+        Token.new(.INT, "10"),
+        Token.new(.RPAREN, ")"),
+        Token.new(.LBRACE, "{"),
+        Token.new(.RETURN, "return"),
+        Token.new(.TRUE, "true"),
+        Token.new(.SEMICOLON, ";"),
+        Token.new(.RBRACE, "}"),
+        Token.new(.ELSE, "else"),
+        Token.new(.LBRACE, "{"),
+        Token.new(.RETURN, "return"),
+        Token.new(.FALSE, "false"),
+        Token.new(.SEMICOLON, ";"),
+        Token.new(.RBRACE, "}"),
+        Token.new(.INT, "10"),
+        Token.new(.EQ, "=="),
+        Token.new(.INT, "10"),
+        Token.new(.SEMICOLON, ";"),
+        Token.new(.INT, "10"),
+        Token.new(.NOT_EQ, "!="),
+        Token.new(.INT, "9"),
+        Token.new(.SEMICOLON, ";"),
+        Token.new(.EOF, ""),
     };
 
     var lexer = Lexer.init(input);
     for (expectedTokens) |token| {
         const tokenFromLexer = lexer.nextToken();
+
         try std.testing.expectEqualDeep(token, tokenFromLexer);
     }
 }

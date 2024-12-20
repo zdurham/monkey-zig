@@ -1,37 +1,27 @@
 const std = @import("std");
+const mem = std.mem;
 const lexer = @import("../lexer/lexer.zig");
 
-const Identifier = struct { token: lexer.Token, value: []const u8 };
-
-const LetStatement = struct {
+pub const LetStatement = struct {
     const Self = @This();
-    token: lexer.Token,
-    name: *Identifier,
-    value: Expression,
+    token: lexer.Token = undefined,
+    name: []const u8 = undefined,
+    // value: ?Expression TODO: implement expressions
 
-    pub fn tokenLiteral() []const u8 {
-        return Self.token.IDENT;
+    pub fn tokenLiteral(self: *Self) []const u8 {
+        return self.token.value;
     }
 };
 
-// const Node = union(enum) {
-//     statement: Statement,
-//     expression: Expression,
-//
-//     pub fn tokenLiteral() void {}
-// };
-
 pub const Statement = union(enum) {
     const Self = @This();
+
+    letStatement: LetStatement,
+
     pub fn tokenLiteral(self: *Self) []const u8 {
         _ = self;
     }
 };
-
-// pub const Statement = struct {
-//     pub fn tokenLiteral() []const u8 {}
-//     pub fn statementNode() void {}
-// };
 
 const Expression = struct {
     pub fn tokenLiteral() []const u8 {}
@@ -41,6 +31,18 @@ const Expression = struct {
 pub const Program = struct {
     const Self = @This();
     statements: std.ArrayList(Statement),
+    allocator: mem.Allocator,
+
+    pub fn init(allocator: mem.Allocator) Self {
+        return Self{
+            .allocator = allocator,
+            .statements = std.ArrayList(Statement).init(allocator),
+        };
+    }
+
+    pub fn deinit(self: *Self) void {
+        self.statements.deinit();
+    }
 
     fn get_token_literal(self: *Self) []const u8 {
         if (self.statements.len > 0) {

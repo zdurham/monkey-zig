@@ -3,23 +3,31 @@ const mem = std.mem;
 const lexer = @import("../lexer/lexer.zig");
 
 pub const LetStatement = struct {
-    const Self = @This();
     token: lexer.Token = undefined,
     name: []const u8 = undefined,
     // value: ?Expression TODO: implement expressions
 
-    pub fn tokenLiteral(self: *Self) []const u8 {
-        return self.token.value;
+    pub fn tokenLiteral(self: LetStatement) []const u8 {
+        return self.token.literal;
+    }
+};
+
+pub const ReturnStatement = struct {
+    token: lexer.Token,
+    // returnValue: Expression, // TODO: implement expression
+    pub fn tokenLiteral(self: ReturnStatement) []const u8 {
+        return self.token.literal;
     }
 };
 
 pub const Statement = union(enum) {
-    const Self = @This();
-
     letStatement: LetStatement,
+    returnStatement: ReturnStatement,
 
-    pub fn tokenLiteral(self: *Self) []const u8 {
-        _ = self;
+    pub fn tokenLiteral(self: Statement) []const u8 {
+        return switch (self) {
+            inline else => |case| case.tokenLiteral(),
+        };
     }
 };
 

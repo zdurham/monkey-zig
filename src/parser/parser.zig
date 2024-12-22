@@ -11,17 +11,25 @@ const Parser = struct {
     allocator: mem.Allocator,
     currentToken: lexer.Token = undefined,
     peekToken: lexer.Token = undefined,
+    errors: std.ArrayList([]const u8),
 
-    pub fn init(allocator: mem.Allocator, l: *lexer.Lexer) *Self {
-        var parser = Self{
+    pub fn init(allocator: mem.Allocator, l: *lexer.Lexer) Self {
+        const errors = std.ArrayList([]const u8).init(allocator);
+        var parser = Parser{
             .lexer = l,
             .allocator = allocator,
+            .errors = errors,
         };
-        // do this twice so we have both currentToken
-        // and peekToken set up
         parser.nextToken();
         parser.nextToken();
-        return &parser;
+        return parser;
+    }
+
+    pub fn deinit(self: *Self) void {
+        for (self.errors.items) |err| {
+            self.allocator.free(err);
+        }
+        self.errors.deinit();
     }
 
     pub fn parseProgram(self: *Self) !ast.Program {
@@ -39,6 +47,7 @@ const Parser = struct {
     fn parseStatement(self: *Self) ?ast.Statement {
         return switch (self.currentToken.kind) {
             TokenType.LET => self.parseLetStatement(),
+            TokenType.RETURN => self.parseReturnStatement(),
             else => null,
         };
     }
@@ -62,6 +71,18 @@ const Parser = struct {
         return ast.Statement{ .letStatement = stmt };
     }
 
+    fn parseReturnStatement(self: *Self) ?ast.Statement {
+        const stmt = ast.ReturnStatement{ .token = self.currentToken };
+        self.nextToken();
+
+        // for now skipping the expression itself
+        while (!self.currentTokenIs(TokenType.SEMICOLON)) {
+            self.nextToken();
+        }
+
+        return ast.Statement{ .returnStatement = stmt };
+    }
+
     fn nextToken(self: *Self) void {
         self.currentToken = self.peekToken;
         self.peekToken = self.lexer.nextToken();
@@ -80,10 +101,38 @@ const Parser = struct {
             self.nextToken();
             return true;
         } else {
+            self.peekError(kind);
             return false;
         }
     }
+
+    fn peekError(self: *Self, kind: TokenType) void {
+        // using catch to avoid propagating an error union
+        const msg = std.fmt.allocPrint(self.allocator, "Expected next token to be {any}, got {any} instead", .{ kind, &self.peekToken.kind }) catch {
+            @panic("Failed to create error message inside peekError");
+        };
+        self.errors.append(msg) catch {
+            @panic("Failed to append error message to Parser.errors");
+        };
+    }
+
+    pub fn getErrors(self: *Self) [][]const u8 {
+        return self.errors.items;
+    }
 };
+
+fn checkParserErrors(parser: *Parser) !void {
+    const errors = parser.getErrors();
+    if (errors.len == 0) {
+        return;
+    }
+    std.debug.print("Parser has errors: {d}\n", .{errors.len});
+    for (errors) |err| {
+        std.debug.print("Parser error: {s}\n", .{err});
+    }
+    // fail the tests now since we didn't want errors
+    try std.testing.expect(errors.len == 0);
+}
 
 test "Test let statements" {
     const allocator = std.testing.allocator;
@@ -93,9 +142,29 @@ test "Test let statements" {
         \\let foobar = 838383;
     ;
     var l = lexer.Lexer.init(input);
-
     var parser = Parser.init(allocator, &l);
     var program = try parser.parseProgram();
+    defer parser.deinit();
     defer program.deinit();
+    try checkParserErrors(&parser);
     try std.testing.expect(program.statements.items.len == 3);
+}
+
+test "test return statements" {
+    const input =
+        \\return 5;
+        \\return 10;
+        \\return 993322;
+    ;
+
+    var l = lexer.Lexer.init(input);
+    var parser = Parser.init(std.testing.allocator, &l);
+    var program = try parser.parseProgram();
+    defer parser.deinit();
+    defer program.deinit();
+    try checkParserErrors(&parser);
+    try std.testing.expect(program.statements.items.len == 3);
+    for (program.statements.items) |stmt| {
+        try std.testing.expectEqual(stmt.tokenLiteral(), "return");
+    }
 }

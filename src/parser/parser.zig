@@ -26,10 +26,10 @@ const Parser = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        for (self.errors.items) |err| {
+        defer for (self.errors.items) |err| {
             self.allocator.free(err);
-        }
-        self.errors.deinit();
+        };
+        defer self.errors.deinit();
     }
 
     pub fn parseProgram(self: *Self) !ast.Program {

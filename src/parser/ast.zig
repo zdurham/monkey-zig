@@ -45,13 +45,48 @@ pub const Identifier = struct {
     token: lexer.Token,
     value: []const u8,
 
+    pub fn tokenLiteral(self: *const Identifier) !void {
+        return self.token.literal();
+    }
+
     pub fn toString(self: *const Identifier, writer: anytype) !void {
         _ = try writer.write(self.value);
     }
 };
 
+pub const IntegerLiteral = struct {
+    token: lexer.Token,
+    value: u64,
+
+    pub fn tokenLiteral(self: *const IntegerLiteral) !void {
+        return self.token.literal;
+    }
+
+    pub fn toString(self: *const IntegerLiteral, writer: anytype) !void {
+        _ = try writer.write(self.token.literal);
+    }
+};
+
+pub const PrefixExpression = struct {
+    token: lexer.Token,
+    operator: []const u8,
+    right: Expression,
+
+    pub fn tokenLiteral(self: *const PrefixExpression) !void {
+        return self.token.literal;
+    }
+
+    pub fn toString(self: *const PrefixExpression, writer: anytype) !void {
+        _ = try writer.write("(");
+        _ = try writer.write(self.operator);
+        try self.right.toString(writer);
+        _ = try writer.write(")");
+    }
+};
+
 pub const Expression = union(enum) {
     identifier: Identifier,
+    integerLiteral: IntegerLiteral,
 
     pub fn toString(self: Expression, writer: anytype) !void {
         switch (self) {

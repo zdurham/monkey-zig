@@ -125,9 +125,7 @@ const Parser = struct {
         const msg = std.fmt.allocPrint(self.allocator, "Expected next token to be {any}, got {any} instead", .{ kind, &self.peekToken.kind }) catch {
             @panic("Failed to create error message inside peekError");
         };
-        self.errors.append(msg) catch {
-            @panic("Failed to append error message to Parser.errors");
-        };
+        self.appendError(msg);
     }
 
     pub fn getErrors(self: *Self) [][]const u8 {
@@ -148,6 +146,7 @@ const Parser = struct {
     fn prefix(self: *Self, kind: TokenType) ?ast.Expression {
         return switch (kind) {
             TokenType.IDENT => self.parseIdentifier(),
+            TokenType.INT => self.parseIntegerLiteral(),
             else => null, // TODO: replace this with error handling
         };
     }
@@ -166,6 +165,24 @@ const Parser = struct {
 
     fn parseIdentifier(self: *Self) ast.Expression {
         return ast.Expression{ .identifier = ast.Identifier{ .token = self.currentToken, .value = self.currentToken.literal } };
+    }
+
+    fn parseIntegerLiteral(self: *Self) ?ast.Expression {
+        const value = std.fmt.parseUnsigned(u64, self.currentToken.literal, 10) catch {
+            const msg = std.fmt.allocPrint(self.allocator, "Failed to parse {s} as an unsigned integer", .{self.currentToken.literal}) catch {
+                @panic("Failed to generate error while inside parseIntegerLiteral");
+            };
+            self.appendError(msg);
+            return null;
+        };
+
+        return ast.Expression{ .integerLiteral = ast.IntegerLiteral{ .token = self.currentToken, .value = value } };
+    }
+
+    fn appendError(self: *Self, msg: []u8) void {
+        self.errors.append(msg) catch {
+            @panic("Failed to append error message to Parser.errors");
+        };
     }
 };
 
@@ -253,11 +270,61 @@ test "identifier expression" {
     try checkParserErrors(&parser);
 
     try std.testing.expectEqual(program.statements.items.len, 1);
+
     const stmt = program.statements.items[0].expressionStatement;
-    const actual = stmt.expression.?.identifier;
+    const identifier = stmt.expression.?.identifier;
     const expected = ast.Identifier{
         .token = lexer.Token.new(TokenType.IDENT, "foobar"),
         .value = "foobar",
     };
-    try std.testing.expectEqualDeep(expected, actual);
+    try std.testing.expectEqualDeep(expected, identifier);
+}
+
+test "integer literal expression" {
+    const input = "5;";
+    var l = lexer.Lexer.init(input);
+    var parser = Parser.init(std.testing.allocator, &l);
+    var program = try parser.parseProgram();
+    defer parser.deinit();
+    defer program.deinit();
+    try checkParserErrors(&parser);
+
+    try std.testing.expectEqual(program.statements.items.len, 1);
+
+    const stmt = program.statements.items[0].expressionStatement;
+    if (stmt.expression) |expr| {
+        const intLiteral = expr.integerLiteral;
+        const expected = ast.IntegerLiteral{
+            .token = lexer.Token.new(TokenType.INT, "5"),
+            .value = 5,
+        };
+        try std.testing.expectEqualDeep(expected, intLiteral);
+    } else {
+        @panic("failed to create an integerLiteral");
+    }
+}
+
+const PrefixTestData = struct {
+    input: []const u8,
+    operator: []const u8,
+    integerValue: u64,
+};
+
+test "prefix operators" {
+    const allocator = std.testing.allocator;
+    const tests: [2]PrefixTestData = .{
+        PrefixTestData{ .input = "!5;", .operator = "!", .integerValue = 5 },
+        PrefixTestData{ .input = "-15;", .operator = "-", .integerValue = 15 },
+    };
+
+    for (tests) |t| {
+        var l = lexer.Lexer.init(t.input);
+        var parser = Parser.init(allocator, &l);
+        var program = try parser.parseProgram();
+        defer parser.deinit();
+        defer program.deinit();
+        try checkParserErrors(&parser);
+
+        try std.testing.expectEqual(program.statements.items.len, 1);
+    }
 }

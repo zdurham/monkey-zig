@@ -5,7 +5,7 @@ const lexer = @import("../lexer/lexer.zig");
 pub const LetStatement = struct {
     token: lexer.Token = undefined,
     name: []const u8 = undefined,
-    value: ?ExpressionStatement = undefined,
+    value: ?Expression = undefined,
 
     pub fn tokenLiteral(self: LetStatement) []const u8 {
         return self.token.literal;
@@ -16,8 +16,8 @@ pub const LetStatement = struct {
         _ = try writer.write(" ");
         _ = try writer.write(self.name);
         _ = try writer.write(" = ");
-        if (self.value) |_| {
-            std.debug.print("ok we have an expr", .{});
+        if (self.value) |expr| {
+            _ = try expr.toString(writer);
         }
 
         _ = try writer.write(";");
@@ -26,7 +26,7 @@ pub const LetStatement = struct {
 
 pub const ReturnStatement = struct {
     token: lexer.Token,
-    returnValue: ?ExpressionStatement = undefined,
+    returnValue: ?Expression = undefined,
     pub fn tokenLiteral(self: ReturnStatement) []const u8 {
         return self.token.literal;
     }
@@ -41,32 +41,37 @@ pub const ReturnStatement = struct {
     }
 };
 
-pub const Expression = union(enum) {
-    // NOTE: Does this need to be here?
+pub const Identifier = struct {
     token: lexer.Token,
-    // TODO: enumerate various expressions
+    value: []const u8,
+
+    pub fn toString(self: *const Identifier, writer: anytype) !void {
+        _ = try writer.write(self.value);
+    }
+};
+
+pub const Expression = union(enum) {
+    identifier: Identifier,
+
     pub fn toString(self: Expression, writer: anytype) !void {
-        _ = self;
-        _ = writer;
-        // TODO: implement cases
-        // switch (self) {
-        //     inline else => |case| try case.toString(writer),
-        // }
+        switch (self) {
+            inline else => |case| try case.toString(writer),
+        }
     }
 };
 
 pub const ExpressionStatement = struct {
-    token: lexer.Token,
-    expression: Expression,
+    token: lexer.Token, // first token of the expression...
+    expression: ?Expression = undefined,
 
     pub fn tokenLiteral(self: ExpressionStatement) []const u8 {
         return self.token.literal;
     }
 
     pub fn toString(self: ExpressionStatement, writer: anytype) !void {
-        // if (self.expression) |es| {
-        try self.expression.toString(writer);
-        // }
+        if (self.expression) |es| {
+            try es.toString(writer);
+        }
     }
 };
 

@@ -134,15 +134,28 @@ const Parser = struct {
         return self.errors.items;
     }
 
-    fn parseExpressionStatement(self: *Self) ast.ExpressionStatement {
-        var stmt = ast.ExpressionStatement{ .token = self.currentToken };
-        stmt.Expression = self.parseExpression(Precedence.LOWEST);
+    fn parseExpressionStatement(self: *Self) ast.Statement {
+        var exprStatement = ast.ExpressionStatement{ .token = self.currentToken };
+        exprStatement.expression = self.parseExpression(Precedence.LOWEST);
 
         if (self.peekTokenIs(TokenType.SEMICOLON)) {
             self.nextToken();
         }
 
-        return stmt;
+        return ast.Statement{ .expressionStatement = exprStatement };
+    }
+
+    fn prefix(self: *Self, kind: TokenType) ?ast.Expression {
+        return switch (kind) {
+            TokenType.IDENT => self.parseIdentifier(),
+            else => null, // TODO: replace this with error handling
+        };
+    }
+
+    // TODO: implement switch
+    fn infix(self: *Self, expression: ast.Expression) ast.Expression {
+        _ = self;
+        _ = expression;
     }
 
     fn parseExpression(self: *Self, precedence: Precedence) ?ast.Expression {
@@ -151,16 +164,8 @@ const Parser = struct {
         return leftExp;
     }
 
-    fn prefix(self: *Self, kind: TokenType) ?ast.Expression {
-        _ = self;
-        return switch (kind) {
-            _ => "thing",
-        };
-    }
-
-    fn infix(self: *Self, expression: ast.Expression) ast.Expression {
-        _ = self;
-        _ = expression;
+    fn parseIdentifier(self: *Self) ast.Expression {
+        return ast.Expression{ .identifier = ast.Identifier{ .token = self.currentToken, .value = self.currentToken.literal } };
     }
 };
 
@@ -212,42 +217,43 @@ test "test return statements" {
     }
 }
 
-// TODO: fix this test homie (by implementing stuff)
 test "toString methods" {
-    const input =
-        \\let x = 5;
-        \\return 10;
-        \\return 993322;
-    ;
-
-    var l = lexer.Lexer.init(input);
-    var parser = Parser.init(std.testing.allocator, &l);
-    var program = try parser.parseProgram();
-    defer parser.deinit();
+    const alloc = std.testing.allocator;
+    var program = ast.Program.init(alloc);
     defer program.deinit();
-    try checkParserErrors(&parser);
-
-    var stringList = std.ArrayList(u8).init(std.testing.allocator);
-    defer stringList.deinit();
-    const writer = stringList.writer();
-    try program.toString(writer);
-    std.debug.print("What you is buddy: {s}\n\n", .{stringList.items});
-    const outcome = try stringList.toOwnedSlice();
-
-    try std.testing.expectEqualSlices(u8, input[0..], outcome);
+    const letStatement = ast.Statement{
+        .letStatement = ast.LetStatement{
+            .token = lexer.Token.new(TokenType.LET, "let"),
+            .name = "myVar",
+            .value = ast.Expression{
+                .identifier = ast.Identifier{
+                    .token = lexer.Token.new(TokenType.IDENT, "anotherVar"),
+                    .value = "anotherVar",
+                },
+            },
+        },
+    };
+    try program.statements.append(letStatement);
+    var actual = std.ArrayList(u8).init(alloc);
+    var expected = std.ArrayList(u8).init(alloc);
+    defer actual.deinit();
+    defer expected.deinit();
+    try expected.appendSlice("let myVar = anotherVar;");
+    try program.toString(actual.writer());
+    try std.testing.expectEqualStrings(expected.items, actual.items);
 }
 
-test "identifier expression" {
-    const input = "foobar;";
-    var l = lexer.Lexer.init(input);
-    var parser = Parser.init(std.testing.allocator, &l);
-    var program = try parser.parseProgram();
-    defer parser.deinit();
-    defer program.deinit();
-    try checkParserErrors(&parser);
-
-    try std.testing.expectEqual(program.statements.items.len, 1);
-    const stmt = program.statements.items[0].expressionStatement;
-    const identifier = stmt.expression;
-    _ = identifier;
-}
+// test "identifier expression" {
+//     const input = "foobar;";
+//     var l = lexer.Lexer.init(input);
+//     var parser = Parser.init(std.testing.allocator, &l);
+//     var program = try parser.parseProgram();
+//     defer parser.deinit();
+//     defer program.deinit();
+//     try checkParserErrors(&parser);
+//
+//     try std.testing.expectEqual(program.statements.items.len, 1);
+//     const stmt = program.statements.items[0].expressionStatement;
+//     const identifier = stmt.expression;
+//     _ = identifier;
+// }

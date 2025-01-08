@@ -243,17 +243,21 @@ test "toString methods" {
     try std.testing.expectEqualStrings(expected.items, actual.items);
 }
 
-// test "identifier expression" {
-//     const input = "foobar;";
-//     var l = lexer.Lexer.init(input);
-//     var parser = Parser.init(std.testing.allocator, &l);
-//     var program = try parser.parseProgram();
-//     defer parser.deinit();
-//     defer program.deinit();
-//     try checkParserErrors(&parser);
-//
-//     try std.testing.expectEqual(program.statements.items.len, 1);
-//     const stmt = program.statements.items[0].expressionStatement;
-//     const identifier = stmt.expression;
-//     _ = identifier;
-// }
+test "identifier expression" {
+    const input = "foobar;";
+    var l = lexer.Lexer.init(input);
+    var parser = Parser.init(std.testing.allocator, &l);
+    var program = try parser.parseProgram();
+    defer parser.deinit();
+    defer program.deinit();
+    try checkParserErrors(&parser);
+
+    try std.testing.expectEqual(program.statements.items.len, 1);
+    const stmt = program.statements.items[0].expressionStatement;
+    const actual = stmt.expression.?.identifier;
+    const expected = ast.Identifier{
+        .token = lexer.Token.new(TokenType.IDENT, "foobar"),
+        .value = "foobar",
+    };
+    try std.testing.expectEqualDeep(expected, actual);
+}

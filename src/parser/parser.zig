@@ -5,13 +5,27 @@ const lexer = @import("../lexer/lexer.zig");
 const TokenType = lexer.TokenType;
 const print = std.debug.print;
 
+const Precedence = enum {
+    LOWEST,
+    EQUALS, // ==,
+    LESSGREATER, // < or >
+    SUM, // +
+    PRODUCT, // *
+    PREFIX, // -X or !X
+    CALL, // myFunc(X)
+};
+
 const Parser = struct {
     const Self = @This();
     lexer: *lexer.Lexer,
     allocator: mem.Allocator,
+
     currentToken: lexer.Token = undefined,
     peekToken: lexer.Token = undefined,
+
     errors: std.ArrayList([]const u8),
+
+    // preFixParseFns =
 
     pub fn init(allocator: mem.Allocator, l: *lexer.Lexer) Self {
         const errors = std.ArrayList([]const u8).init(allocator);
@@ -48,7 +62,7 @@ const Parser = struct {
         return switch (self.currentToken.kind) {
             TokenType.LET => self.parseLetStatement(),
             TokenType.RETURN => self.parseReturnStatement(),
-            else => null,
+            else => self.parseExpressionStatement(),
         };
     }
 
@@ -119,6 +133,35 @@ const Parser = struct {
     pub fn getErrors(self: *Self) [][]const u8 {
         return self.errors.items;
     }
+
+    fn parseExpressionStatement(self: *Self) ast.ExpressionStatement {
+        var stmt = ast.ExpressionStatement{ .token = self.currentToken };
+        stmt.Expression = self.parseExpression(Precedence.LOWEST);
+
+        if (self.peekTokenIs(TokenType.SEMICOLON)) {
+            self.nextToken();
+        }
+
+        return stmt;
+    }
+
+    fn parseExpression(self: *Self, precedence: Precedence) ?ast.Expression {
+        _ = precedence;
+        const leftExp = self.prefix(self.currentToken.kind);
+        return leftExp;
+    }
+
+    fn prefix(self: *Self, kind: TokenType) ?ast.Expression {
+        _ = self;
+        return switch (kind) {
+            _ => "thing",
+        };
+    }
+
+    fn infix(self: *Self, expression: ast.Expression) ast.Expression {
+        _ = self;
+        _ = expression;
+    }
 };
 
 fn checkParserErrors(parser: *Parser) !void {
@@ -167,4 +210,44 @@ test "test return statements" {
     for (program.statements.items) |stmt| {
         try std.testing.expectEqual(stmt.tokenLiteral(), "return");
     }
+}
+
+// TODO: fix this test homie (by implementing stuff)
+test "toString methods" {
+    const input =
+        \\let x = 5;
+        \\return 10;
+        \\return 993322;
+    ;
+
+    var l = lexer.Lexer.init(input);
+    var parser = Parser.init(std.testing.allocator, &l);
+    var program = try parser.parseProgram();
+    defer parser.deinit();
+    defer program.deinit();
+    try checkParserErrors(&parser);
+
+    var stringList = std.ArrayList(u8).init(std.testing.allocator);
+    defer stringList.deinit();
+    const writer = stringList.writer();
+    try program.toString(writer);
+    std.debug.print("What you is buddy: {s}\n\n", .{stringList.items});
+    const outcome = try stringList.toOwnedSlice();
+
+    try std.testing.expectEqualSlices(u8, input[0..], outcome);
+}
+
+test "identifier expression" {
+    const input = "foobar;";
+    var l = lexer.Lexer.init(input);
+    var parser = Parser.init(std.testing.allocator, &l);
+    var program = try parser.parseProgram();
+    defer parser.deinit();
+    defer program.deinit();
+    try checkParserErrors(&parser);
+
+    try std.testing.expectEqual(program.statements.items.len, 1);
+    const stmt = program.statements.items[0].expressionStatement;
+    const identifier = stmt.expression;
+    _ = identifier;
 }

@@ -12,14 +12,15 @@ pub const LetStatement = struct {
     }
 
     pub fn toString(self: LetStatement, writer: anytype) !void {
-        try writer.write(self.tokenLiteral());
-        try writer.write(" ");
-        try writer.write(self.name);
-        try writer.write(" = ");
-        // try writer.write(
+        _ = try writer.write(self.tokenLiteral());
+        _ = try writer.write(" ");
+        _ = try writer.write(self.name);
+        _ = try writer.write(" = ");
         if (self.value) |_| {
             std.debug.print("ok we have an expr", .{});
         }
+
+        _ = try writer.write(";");
     }
 };
 
@@ -31,22 +32,26 @@ pub const ReturnStatement = struct {
     }
 
     pub fn toString(self: ReturnStatement, writer: anytype) !void {
-        try writer.write(self.token.literal);
-        try writer.write(" ");
+        _ = try writer.write(self.token.literal);
+        _ = try writer.write(" ");
         if (self.returnValue) |rValue| {
-            try writer.write(rValue.toString(writer));
+            try rValue.toString(writer);
         }
-        try writer.write(";");
+        _ = try writer.write(";");
     }
 };
 
 pub const Expression = union(enum) {
+    // NOTE: Does this need to be here?
     token: lexer.Token,
     // TODO: enumerate various expressions
-    pub fn toString(self: Expression, writer: anytype) void {
-        return switch (self) {
-            inline else => |case| case.toString(writer),
-        };
+    pub fn toString(self: Expression, writer: anytype) !void {
+        _ = self;
+        _ = writer;
+        // TODO: implement cases
+        // switch (self) {
+        //     inline else => |case| try case.toString(writer),
+        // }
     }
 };
 
@@ -58,11 +63,10 @@ pub const ExpressionStatement = struct {
         return self.token.literal;
     }
 
-    pub fn toString(self: ExpressionStatement, writer: anytype) void {
-        if (self.expression) |es| {
-            return es.toString(writer);
-        }
-        return "";
+    pub fn toString(self: ExpressionStatement, writer: anytype) !void {
+        // if (self.expression) |es| {
+        try self.expression.toString(writer);
+        // }
     }
 };
 
@@ -77,10 +81,10 @@ pub const Statement = union(enum) {
         };
     }
 
-    pub fn toString(self: Statement, writer: anytype) []const u8 {
-        return switch (self) {
-            inline else => |case| case.string(writer),
-        };
+    pub fn toString(self: Statement, writer: anytype) !void {
+        switch (self) {
+            inline else => |case| try case.toString(writer),
+        }
     }
 };
 

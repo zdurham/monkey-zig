@@ -45,11 +45,11 @@ pub const Identifier = struct {
     token: lexer.Token,
     value: []const u8,
 
-    pub fn tokenLiteral(self: *const Identifier) !void {
+    pub fn tokenLiteral(self: Identifier) !void {
         return self.token.literal();
     }
 
-    pub fn toString(self: *const Identifier, writer: anytype) !void {
+    pub fn toString(self: Identifier, writer: anytype) !void {
         _ = try writer.write(self.value);
     }
 };
@@ -68,29 +68,57 @@ pub const IntegerLiteral = struct {
 };
 
 pub const PrefixExpression = struct {
+    const Self = @This();
+    allocator: mem.Allocator,
     token: lexer.Token,
     operator: []const u8,
-    right: Expression,
+    right: ?*Expression,
 
-    pub fn tokenLiteral(self: *const PrefixExpression) !void {
+    pub fn init(allocator: mem.Allocator, token: lexer.Token, operator: []const u8) Self {
+        return Self{
+            .allocator = allocator,
+            .token = token,
+            .operator = operator,
+            .right = null,
+        };
+    }
+    // TODO: we will eventually need to deinit the right expression
+    // and furthermore provide a deinit on all expressions
+    // pub fn deinit(_: *Self) void {
+    // }
+
+    pub fn createRight(self: *Self, expression: Expression) !void {
+        // create a pointer
+        // because we can't just point back to Expression
+        self.right = try self.allocator.create(Expression);
+        // then we assign the actual expression to the pointer
+        self.right.?.* = expression;
+    }
+
+    pub fn tokenLiteral(self: *Self) !void {
         return self.token.literal;
     }
 
-    pub fn toString(self: *const PrefixExpression, writer: anytype) !void {
+    pub fn toString(self: Self, writer: anytype) !void {
         _ = try writer.write("(");
         _ = try writer.write(self.operator);
-        try self.right.toString(writer);
+        if (self.right) |right| {
+            std.debug.print("{any}\n", .{right});
+            // try right.toString(writer);
+        }
         _ = try writer.write(")");
     }
 };
 
 pub const Expression = union(enum) {
+    const Self = @This();
     identifier: Identifier,
     integerLiteral: IntegerLiteral,
+    prefixExpression: PrefixExpression,
 
-    pub fn toString(self: Expression, writer: anytype) !void {
+    pub fn toString(self: Self, writer: anytype) !void {
         switch (self) {
-            inline else => |case| try case.toString(writer),
+            inline else => |expr| try expr.toString(writer),
         }
     }
 };

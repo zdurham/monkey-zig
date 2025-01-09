@@ -40,10 +40,10 @@ const Parser = struct {
     }
 
     pub fn deinit(self: *Self) void {
+        defer self.errors.deinit();
         defer for (self.errors.items) |err| {
             self.allocator.free(err);
         };
-        defer self.errors.deinit();
     }
 
     pub fn parseProgram(self: *Self) !ast.Program {
@@ -147,7 +147,15 @@ const Parser = struct {
         return switch (kind) {
             TokenType.IDENT => self.parseIdentifier(),
             TokenType.INT => self.parseIntegerLiteral(),
-            else => null, // TODO: replace this with error handling
+            TokenType.BANG => self.parsePrefixExpression(),
+            TokenType.MINUS => self.parsePrefixExpression(),
+            else => blk: {
+                const message: []u8 = std.fmt.allocPrint(self.allocator, "No prefix parse function for {any}", .{kind}) catch {
+                    @panic("Error occured attempting to create error message inside prefix()");
+                };
+                self.appendError(message);
+                break :blk null;
+            },
         };
     }
 
@@ -159,8 +167,7 @@ const Parser = struct {
 
     fn parseExpression(self: *Self, precedence: Precedence) ?ast.Expression {
         _ = precedence;
-        const leftExp = self.prefix(self.currentToken.kind);
-        return leftExp;
+        return self.prefix(self.currentToken.kind);
     }
 
     fn parseIdentifier(self: *Self) ast.Expression {
@@ -177,6 +184,18 @@ const Parser = struct {
         };
 
         return ast.Expression{ .integerLiteral = ast.IntegerLiteral{ .token = self.currentToken, .value = value } };
+    }
+
+    fn parsePrefixExpression(self: *Self) ?ast.Expression {
+        var prefixExpr = ast.PrefixExpression.init(self.allocator, self.currentToken, self.currentToken.literal);
+
+        self.nextToken();
+        // create a pointer to the
+        if (self.parseExpression(Precedence.PREFIX)) |expr| {
+            prefixExpr.createRight(expr) catch unreachable;
+        }
+
+        return ast.Expression{ .prefixExpression = prefixExpr };
     }
 
     fn appendError(self: *Self, msg: []u8) void {
@@ -212,7 +231,7 @@ test "Test let statements" {
     defer parser.deinit();
     defer program.deinit();
     try checkParserErrors(&parser);
-    try std.testing.expect(program.statements.items.len == 3);
+    try std.testing.expectEqual(3, program.statements.items.len);
 }
 
 test "test return statements" {
@@ -228,9 +247,9 @@ test "test return statements" {
     defer parser.deinit();
     defer program.deinit();
     try checkParserErrors(&parser);
-    try std.testing.expect(program.statements.items.len == 3);
+    try std.testing.expectEqual(3, program.statements.items.len);
     for (program.statements.items) |stmt| {
-        try std.testing.expectEqual(stmt.tokenLiteral(), "return");
+        try std.testing.expectEqual("return", stmt.tokenLiteral());
     }
 }
 
@@ -269,7 +288,7 @@ test "identifier expression" {
     defer program.deinit();
     try checkParserErrors(&parser);
 
-    try std.testing.expectEqual(program.statements.items.len, 1);
+    try std.testing.expectEqual(1, program.statements.items.len);
 
     const stmt = program.statements.items[0].expressionStatement;
     const identifier = stmt.expression.?.identifier;
@@ -289,7 +308,7 @@ test "integer literal expression" {
     defer program.deinit();
     try checkParserErrors(&parser);
 
-    try std.testing.expectEqual(program.statements.items.len, 1);
+    try std.testing.expectEqual(1, program.statements.items.len);
 
     const stmt = program.statements.items[0].expressionStatement;
     if (stmt.expression) |expr| {
@@ -300,7 +319,7 @@ test "integer literal expression" {
         };
         try std.testing.expectEqualDeep(expected, intLiteral);
     } else {
-        @panic("failed to create an integerLiteral");
+        try std.testing.expect(false);
     }
 }
 
@@ -317,6 +336,7 @@ test "prefix operators" {
         PrefixTestData{ .input = "-15;", .operator = "-", .integerValue = 15 },
     };
 
+    // const t = tests[0];
     for (tests) |t| {
         var l = lexer.Lexer.init(t.input);
         var parser = Parser.init(allocator, &l);
@@ -325,6 +345,10 @@ test "prefix operators" {
         defer program.deinit();
         try checkParserErrors(&parser);
 
-        try std.testing.expectEqual(program.statements.items.len, 1);
+        try std.testing.expectEqual(1, program.statements.items.len);
+        const expr = program.statements.items[0].expressionStatement.expression.?.prefixExpression;
+        try std.testing.expectEqual(t.operator, t.operator);
+        const intLit = expr.right.?.integerLiteral;
+        try std.testing.expectEqual(t.integerValue, intLit.value);
     }
 }

@@ -7,6 +7,13 @@ pub const LetStatement = struct {
     name: []const u8 = undefined,
     value: ?Expression = undefined,
 
+    pub fn deinit(self: *LetStatement) void {
+        if (self.value) |*expr| {
+            expr.deinit();
+            self.value = null;
+        }
+    }
+
     pub fn tokenLiteral(self: LetStatement) []const u8 {
         return self.token.literal;
     }
@@ -27,6 +34,14 @@ pub const LetStatement = struct {
 pub const ReturnStatement = struct {
     token: lexer.Token,
     returnValue: ?Expression = undefined,
+
+    pub fn deinit(self: *ReturnStatement) void {
+        if (self.returnValue) |*expr| {
+            expr.deinit();
+            self.returnValue = null;
+        }
+    }
+
     pub fn tokenLiteral(self: ReturnStatement) []const u8 {
         return self.token.literal;
     }
@@ -45,6 +60,8 @@ pub const Identifier = struct {
     token: lexer.Token,
     value: []const u8,
 
+    pub fn deinit(_: Identifier) void {}
+
     pub fn tokenLiteral(self: Identifier) !void {
         return self.token.literal();
     }
@@ -57,6 +74,8 @@ pub const Identifier = struct {
 pub const IntegerLiteral = struct {
     token: lexer.Token,
     value: u64,
+
+    pub fn deinit(_: IntegerLiteral) void {}
 
     pub fn tokenLiteral(self: *const IntegerLiteral) !void {
         return self.token.literal;
@@ -82,10 +101,16 @@ pub const PrefixExpression = struct {
             .right = null,
         };
     }
-    // TODO: we will eventually need to deinit the right expression
-    // and furthermore provide a deinit on all expressions
-    // pub fn deinit(_: *Self) void {
-    // }
+
+    pub fn deinit(self: *Self) void {
+        if (self.right) |*right| {
+            // call deinit on the expression recursively
+            right.*.deinit();
+            // still have to remove this pointer
+            self.allocator.destroy(right.*);
+            self.right = null;
+        }
+    }
 
     pub fn createRight(self: *Self, expression: Expression) !void {
         // create a pointer
@@ -116,6 +141,12 @@ pub const Expression = union(enum) {
     integerLiteral: IntegerLiteral,
     prefixExpression: PrefixExpression,
 
+    pub fn deinit(self: *Self) void {
+        switch (self.*) {
+            inline else => |*expr| expr.*.deinit(),
+        }
+    }
+
     pub fn toString(self: Self, writer: anytype) !void {
         switch (self) {
             inline else => |expr| try expr.toString(writer),
@@ -124,8 +155,16 @@ pub const Expression = union(enum) {
 };
 
 pub const ExpressionStatement = struct {
+    const Self = @This();
     token: lexer.Token, // first token of the expression...
     expression: ?Expression = undefined,
+
+    pub fn deinit(self: *Self) void {
+        if (self.expression) |*expr| {
+            expr.deinit();
+            self.expression = null;
+        }
+    }
 
     pub fn tokenLiteral(self: ExpressionStatement) []const u8 {
         return self.token.literal;
@@ -139,9 +178,16 @@ pub const ExpressionStatement = struct {
 };
 
 pub const Statement = union(enum) {
+    const Self = @This();
     letStatement: LetStatement,
     returnStatement: ReturnStatement,
     expressionStatement: ExpressionStatement,
+
+    pub fn deinit(self: *Self) void {
+        switch (self.*) {
+            inline else => |*stmt| stmt.*.deinit(),
+        }
+    }
 
     pub fn tokenLiteral(self: Statement) []const u8 {
         return switch (self) {
@@ -169,7 +215,12 @@ pub const Program = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        self.statements.deinit();
+        // statements are immutable, so we're using pointer capture
+        // to get a pointer and modify the original values directly
+        for (self.statements.items) |*stmt| {
+            stmt.*.deinit();
+        }
+        defer self.statements.deinit();
     }
 
     fn getTokenLiteral(self: *Self) []const u8 {

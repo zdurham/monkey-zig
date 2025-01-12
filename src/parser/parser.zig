@@ -15,6 +15,20 @@ const Precedence = enum {
     CALL, // myFunc(X)
 };
 
+fn checkPrecedence(tokenType: TokenType) Precedence {
+    return switch (tokenType) {
+        TokenType.EQ => Precedence.EQUALS,
+        TokenType.NOT_EQ => Precedence.EQUALS,
+        TokenType.LT => Precedence.LESSGREATER,
+        TokenType.GT => Precedence.LESSGREATER,
+        TokenType.PLUS => Precedence.SUM,
+        TokenType.MINUS => Precedence.SUM,
+        TokenType.ASTERISK => Precedence.PRODUCT,
+        TokenType.SLASH => Precedence.PRODUCT,
+        else => Precedence.LOWEST,
+    };
+}
+
 const Parser = struct {
     const Self = @This();
     lexer: *lexer.Lexer,
@@ -24,8 +38,6 @@ const Parser = struct {
     peekToken: lexer.Token = undefined,
 
     errors: std.ArrayList([]const u8),
-
-    // preFixParseFns =
 
     pub fn init(allocator: mem.Allocator, l: *lexer.Lexer) Self {
         const errors = std.ArrayList([]const u8).init(allocator);
@@ -143,14 +155,14 @@ const Parser = struct {
         return ast.Statement{ .expressionStatement = exprStatement };
     }
 
-    fn prefix(self: *Self, kind: TokenType) ?ast.Expression {
-        return switch (kind) {
+    fn prefix(self: *Self, tokenType: TokenType) ?ast.Expression {
+        return switch (tokenType) {
             TokenType.IDENT => self.parseIdentifier(),
             TokenType.INT => self.parseIntegerLiteral(),
             TokenType.BANG => self.parsePrefixExpression(),
             TokenType.MINUS => self.parsePrefixExpression(),
-            else => blk: {
-                const message: []u8 = std.fmt.allocPrint(self.allocator, "No prefix parse function for {any}", .{kind}) catch {
+            else => blk: { // TODO: move this to a separate function since we dupe it in infix, return an error here instead
+                const message: []u8 = std.fmt.allocPrint(self.allocator, "No prefix parse function for {any}", .{tokenType}) catch {
                     @panic("Error occured attempting to create error message inside prefix()");
                 };
                 self.appendError(message);
@@ -160,9 +172,24 @@ const Parser = struct {
     }
 
     // TODO: implement switch
-    fn infix(self: *Self, expression: ast.Expression) ast.Expression {
-        _ = self;
-        _ = expression;
+    fn infix(self: *Self, tokenType: TokenType) ?ast.Expression {
+        switch (tokenType) {
+            TokenType.EQ => self.parseInfixExpression(),
+            TokenType.NOT_EQ => self.parseInfixExpression(),
+            TokenType.LT => self.parseInfixExpression(),
+            TokenType.GT => self.parseInfixExpression(),
+            TokenType.PLUS => self.parseInfixExpression(),
+            TokenType.MINUS => self.parseInfixExpression(),
+            TokenType.ASTERISK => self.parseInfixExpression(),
+            TokenType.SLASH => self.parseInfixExpression(),
+            else => blk: {
+                const message: []u8 = std.fmt.allocPrint(self.allocator, "No infix parse function for {any}", .{tokenType}) catch {
+                    @panic("Error occured attempting to create error message inside infix()");
+                };
+                self.appendError(message);
+                break :blk null;
+            },
+        }
     }
 
     fn parseExpression(self: *Self, precedence: Precedence) ?ast.Expression {
@@ -196,6 +223,25 @@ const Parser = struct {
         }
 
         return ast.Expression{ .prefixExpression = prefixExpr };
+    }
+
+    fn parseInfixExpression(self: *Self, left: ast.Expression) ?ast.Expression {
+        var expr = ast.InfixExpression.init(self.allocator, self.currentToken, self.currentToken.literal, &left);
+
+        const precedence = self.currentPrecedence();
+        self.nextToken();
+        if (self.parseExpression(precedence)) |right| {
+            expr.createRight(right) catch unreachable;
+        }
+
+        return ast.Expresssion{ .infixExpression = expr };
+    }
+    fn peekPrecedence(self: Self) Precedence {
+        return checkPrecedence(self.peekToken.kind);
+    }
+
+    fn currentPrecedence(self: Self) Precedence {
+        return checkPrecedence(self.currentToken.kind);
     }
 
     fn appendError(self: *Self, msg: []u8) void {
@@ -350,5 +396,42 @@ test "prefix operators" {
         try std.testing.expectEqual(t.operator, t.operator);
         const intLit = expr.right.?.integerLiteral;
         try std.testing.expectEqual(t.integerValue, intLit.value);
+    }
+}
+
+const InfixTestData = struct {
+    input: []const u8,
+    leftValue: i64,
+    operator: []const u8,
+    rightValue: i64,
+
+    pub fn new(input: []const u8, leftValue: i64, operator: []const u8, rightValue: i64) InfixTestData {
+        return .{ .input = input, .leftValue = leftValue, .operator = operator, .rightValue = rightValue };
+    }
+};
+
+test "infix operators" {
+    const tests: [8]InfixTestData = .{
+        InfixTestData.new("5 + 5", 5, "+", 5),
+        InfixTestData.new("5 - 5", 5, "-", 5),
+        InfixTestData.new("5 * 5", 5, "*", 5),
+        InfixTestData.new("5 / 5", 5, "/", 5),
+        InfixTestData.new("5 < 5", 5, "<", 5),
+        InfixTestData.new("5 > 5", 5, ">", 5),
+        InfixTestData.new("5 == 5", 5, "==", 5),
+        InfixTestData.new("5 != 5", 5, "!=", 5),
+    };
+
+    const allocator = std.testing.allocator;
+
+    for (tests) |t| {
+        var l = lexer.Lexer.init(t.input);
+        var parser = Parser.init(allocator, &l);
+        var program = try parser.parseProgram();
+        defer parser.deinit();
+        defer program.deinit();
+        try checkParserErrors(&parser);
+
+        try std.testing.expectEqual(1, program.statements.items.len);
     }
 }

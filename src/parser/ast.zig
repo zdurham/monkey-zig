@@ -1,6 +1,7 @@
 const std = @import("std");
 const mem = std.mem;
 const lexer = @import("../lexer/lexer.zig");
+const WriteError = std.posix.WriteError;
 
 pub const LetStatement = struct {
     token: lexer.Token = undefined,
@@ -18,7 +19,7 @@ pub const LetStatement = struct {
         return self.token.literal;
     }
 
-    pub fn toString(self: LetStatement, writer: anytype) !void {
+    pub fn toString(self: LetStatement, writer: anytype) anyerror!void {
         _ = try writer.write(self.tokenLiteral());
         _ = try writer.write(" ");
         _ = try writer.write(self.name);
@@ -46,7 +47,7 @@ pub const ReturnStatement = struct {
         return self.token.literal;
     }
 
-    pub fn toString(self: ReturnStatement, writer: anytype) !void {
+    pub fn toString(self: ReturnStatement, writer: anytype) anyerror!void {
         _ = try writer.write(self.token.literal);
         _ = try writer.write(" ");
         if (self.returnValue) |rValue| {
@@ -62,11 +63,11 @@ pub const Identifier = struct {
 
     pub fn deinit(_: Identifier) void {}
 
-    pub fn tokenLiteral(self: Identifier) !void {
+    pub fn tokenLiteral(self: Identifier) anyerror!void {
         return self.token.literal();
     }
 
-    pub fn toString(self: Identifier, writer: anytype) !void {
+    pub fn toString(self: Identifier, writer: anytype) anyerror!void {
         _ = try writer.write(self.value);
     }
 };
@@ -77,11 +78,11 @@ pub const IntegerLiteral = struct {
 
     pub fn deinit(_: IntegerLiteral) void {}
 
-    pub fn tokenLiteral(self: *const IntegerLiteral) !void {
+    pub fn tokenLiteral(self: *const IntegerLiteral) anyerror!void {
         return self.token.literal;
     }
 
-    pub fn toString(self: *const IntegerLiteral, writer: anytype) !void {
+    pub fn toString(self: *const IntegerLiteral, writer: anytype) anyerror!void {
         _ = try writer.write(self.token.literal);
     }
 };
@@ -112,7 +113,7 @@ pub const PrefixExpression = struct {
         }
     }
 
-    pub fn createRight(self: *Self, expression: Expression) !void {
+    pub fn createRight(self: *Self, expression: Expression) anyerror!void {
         // create a pointer
         // because we can't just point back to Expression
         self.right = try self.allocator.create(Expression);
@@ -120,16 +121,71 @@ pub const PrefixExpression = struct {
         self.right.?.* = expression;
     }
 
-    pub fn tokenLiteral(self: *Self) !void {
+    pub fn tokenLiteral(self: *Self) anyerror!void {
         return self.token.literal;
     }
 
-    pub fn toString(self: Self, writer: anytype) !void {
+    pub fn toString(self: Self, writer: anytype) anyerror!void {
         _ = try writer.write("(");
         _ = try writer.write(self.operator);
         if (self.right) |right| {
-            std.debug.print("{any}\n", .{right});
-            // try right.toString(writer);
+            // why can't this infer the error set...
+            try right.toString(writer);
+        }
+        _ = try writer.write(")");
+    }
+};
+
+pub const InfixExpression = struct {
+    const Self = @This();
+    token: lexer.Token,
+    left: ?*Expression = undefined,
+    operator: []const u8,
+    right: ?*Expression = undefined,
+
+    pub fn init(allocator: mem.Allocator, token: lexer.Token, operator: []const u8, left: ?*Expression) Self {
+        return Self{
+            .allocator = allocator,
+            .token = token,
+            .operator = operator,
+            .left = left,
+            .right = null,
+        };
+    }
+
+    pub fn deinit(self: *Self) void {
+        if (self.right) |*right| {
+            // call deinit on the expression recursively
+            right.*.deinit();
+            // still have to remove this pointer
+            self.allocator.destroy(right.*);
+            self.right = null;
+        }
+    }
+
+    pub fn createRight(self: *Self, expression: Expression) anyerror!void {
+        // create a pointer
+        // because we can't just point back to Expression
+        self.right = try self.allocator.create(Expression);
+        // then we assign the actual expression to the pointer
+        self.right.?.* = expression;
+    }
+
+    pub fn tokenLiteral(self: Self) []const u8 {
+        return self.token.literal;
+    }
+
+    pub fn toString(self: *Self, writer: anytype) anyerror!void {
+        _ = try writer.write("(");
+        if (self.left) |left| {
+            try left.*.toString(writer);
+        }
+        _ = try writer.write(" ");
+        _ = try writer.write(self.operator);
+        _ = try writer.write(" ");
+
+        if (self.right) |right| {
+            try right.*.toString(writer);
         }
         _ = try writer.write(")");
     }
@@ -140,6 +196,7 @@ pub const Expression = union(enum) {
     identifier: Identifier,
     integerLiteral: IntegerLiteral,
     prefixExpression: PrefixExpression,
+    infixExpression: InfixExpression,
 
     pub fn deinit(self: *Self) void {
         switch (self.*) {
@@ -147,7 +204,7 @@ pub const Expression = union(enum) {
         }
     }
 
-    pub fn toString(self: Self, writer: anytype) !void {
+    pub fn toString(self: Self, writer: anytype) anyerror!void {
         switch (self) {
             inline else => |expr| try expr.toString(writer),
         }
@@ -170,7 +227,7 @@ pub const ExpressionStatement = struct {
         return self.token.literal;
     }
 
-    pub fn toString(self: ExpressionStatement, writer: anytype) !void {
+    pub fn toString(self: ExpressionStatement, writer: anytype) anyerror!void {
         if (self.expression) |es| {
             try es.toString(writer);
         }
@@ -195,7 +252,7 @@ pub const Statement = union(enum) {
         };
     }
 
-    pub fn toString(self: Statement, writer: anytype) !void {
+    pub fn toString(self: Statement, writer: anytype) anyerror!void {
         switch (self) {
             inline else => |case| try case.toString(writer),
         }
@@ -233,7 +290,7 @@ pub const Program = struct {
 
     // we'll pass an arbitrary writer() in to this function
     // and all children will use it as well
-    pub fn toString(self: *Self, writer: anytype) !void {
+    pub fn toString(self: *Self, writer: anytype) anyerror!void {
         for (self.statements.items) |stmt| {
             try stmt.toString(writer);
         }

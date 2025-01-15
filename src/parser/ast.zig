@@ -104,11 +104,11 @@ pub const PrefixExpression = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        if (self.right) |*right| {
+        if (self.right) |right| {
             // call deinit on the expression recursively
-            right.*.deinit();
+            right.deinit();
             // still have to remove this pointer
-            self.allocator.destroy(right.*);
+            self.allocator.destroy(right);
             self.right = null;
         }
     }
@@ -129,7 +129,6 @@ pub const PrefixExpression = struct {
         _ = try writer.write("(");
         _ = try writer.write(self.operator);
         if (self.right) |right| {
-            // why can't this infer the error set...
             try right.toString(writer);
         }
         _ = try writer.write(")");

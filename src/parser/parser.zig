@@ -223,6 +223,9 @@ const Parser = struct {
                     // TODO: we may need to handle error cases when we don't have an infix from self.infix(pLeft);
                     if (self.infix(pLeft)) |ifx| {
                         leftExpr = ifx;
+                    } else {
+                        self.allocator.destroy(pLeft);
+                        std.debug.print("idk what happens here boss\n", .{});
                     }
                 } else {
                     return leftExpr;
@@ -490,5 +493,38 @@ test "infix operators" {
         try std.testing.expectEqual(t.leftValue, exp.left.?.integerLiteral.value);
         try std.testing.expectEqual(t.operator, exp.operator);
         try std.testing.expectEqual(t.rightValue, exp.right.?.integerLiteral.value);
+    }
+}
+
+test "operator precedence parsing" {
+    const PrecdenceTestData = struct { input: []const u8, output: []const u8 };
+    const tests: [11]PrecdenceTestData = .{
+        PrecdenceTestData{ .input = "-a * b", .output = "((-a) * b)" },
+        PrecdenceTestData{ .input = "!-a", .output = "(!(-a))" },
+        PrecdenceTestData{ .input = "a + b +c", .output = "((a + b) + c)" },
+        PrecdenceTestData{ .input = "a + b - c", .output = "((a + b) - c)" },
+        PrecdenceTestData{ .input = "a * b / c", .output = "((a * b) / c)" },
+        PrecdenceTestData{ .input = "a + b / c", .output = "(a + (b / c))" },
+        PrecdenceTestData{ .input = "a + b * c + d / e - f", .output = "(((a + (b * c)) + (d / e)) - f)" },
+        PrecdenceTestData{ .input = "3 + 4; -5 * 5", .output = "(3 + 4)((-5) * 5)" },
+        PrecdenceTestData{ .input = "5 > 4 == 3 < 4", .output = "((5 > 4) == (3 < 4))" },
+        PrecdenceTestData{ .input = "5 < 4 != 3 > 4", .output = "((5 < 4) != (3 > 4))" },
+        PrecdenceTestData{ .input = "3 + 4 * 5 == 3 * 1 + 4 * 5", .output = "((3 + (4 * 5)) == ((3 * 1) + (4 * 5)))" },
+    };
+
+    const allocator = std.testing.allocator;
+    for (tests) |t| {
+        var l = lexer.Lexer.init(t.input);
+        var parser = Parser.init(allocator, &l);
+        var program = try parser.parseProgram();
+        defer parser.deinit();
+        defer program.deinit();
+
+        try checkParserErrors(&parser);
+
+        var actual = std.ArrayList(u8).init(allocator);
+        defer actual.deinit();
+        try program.toString(actual.writer());
+        try std.testing.expectEqualStrings(t.output, actual.items);
     }
 }

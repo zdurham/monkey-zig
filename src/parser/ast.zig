@@ -155,17 +155,15 @@ pub const InfixExpression = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        if (self.right) |*right| {
-            // call deinit on the expression recursively
-            right.*.deinit();
-            // still have to remove this pointer
-            self.allocator.destroy(right.*);
+        if (self.right) |right| {
+            right.deinit();
+            self.allocator.destroy(right);
             self.right = null;
         }
 
-        if (self.left) |*left| {
-            left.*.deinit();
-            self.allocator.destroy(left.*);
+        if (self.left) |left| {
+            left.deinit();
+            self.allocator.destroy(left);
             self.left = null;
         }
     }

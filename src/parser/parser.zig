@@ -13,6 +13,14 @@ const Precedence = enum {
     PRODUCT, // *
     PREFIX, // -X or !X
     CALL, // myFunc(X)
+    //
+    pub fn lessThan(self: Precedence, other: Precedence) bool {
+        return @intFromEnum(self) < @intFromEnum(other);
+    }
+
+    pub fn greaterThan(self: Precedence, other: Precedence) bool {
+        return @intFromEnum(self) > @intFromEnum(other);
+    }
 };
 
 fn checkPrecedence(tokenType: TokenType) Precedence {
@@ -26,6 +34,20 @@ fn checkPrecedence(tokenType: TokenType) Precedence {
         TokenType.ASTERISK => Precedence.PRODUCT,
         TokenType.SLASH => Precedence.PRODUCT,
         else => Precedence.LOWEST,
+    };
+}
+
+fn isOperator(tokenType: TokenType) bool {
+    return switch (tokenType) {
+        TokenType.EQ => true,
+        TokenType.NOT_EQ => true,
+        TokenType.LT => true,
+        TokenType.GT => true,
+        TokenType.PLUS => true,
+        TokenType.MINUS => true,
+        TokenType.ASTERISK => true,
+        TokenType.SLASH => true,
+        else => false,
     };
 }
 
@@ -112,6 +134,8 @@ const Parser = struct {
     fn nextToken(self: *Self) void {
         self.currentToken = self.peekToken;
         self.peekToken = self.lexer.nextToken();
+        // print("currentToken in nextToken: {any} {s}\n", .{ self.currentToken.kind, self.currentToken.literal });
+        // print("peekToken in nextToken: {any} {s}\n", .{ self.peekToken.kind, self.peekToken.literal });
     }
 
     fn currentTokenIs(self: *Self, kind: TokenType) bool {
@@ -161,40 +185,60 @@ const Parser = struct {
             TokenType.INT => self.parseIntegerLiteral(),
             TokenType.BANG => self.parsePrefixExpression(),
             TokenType.MINUS => self.parsePrefixExpression(),
-            else => blk: { // TODO: move this to a separate function since we dupe it in infix, return an error here instead
-                const message: []u8 = std.fmt.allocPrint(self.allocator, "No prefix parse function for {any}", .{tokenType}) catch {
-                    @panic("Error occured attempting to create error message inside prefix()");
-                };
-                self.appendError(message);
+            else => blk: {
+                self.generateParseError("prefix", tokenType);
                 break :blk null;
             },
         };
     }
 
-    // TODO: implement switch
-    fn infix(self: *Self, tokenType: TokenType) ?ast.Expression {
-        switch (tokenType) {
-            TokenType.EQ => self.parseInfixExpression(),
-            TokenType.NOT_EQ => self.parseInfixExpression(),
-            TokenType.LT => self.parseInfixExpression(),
-            TokenType.GT => self.parseInfixExpression(),
-            TokenType.PLUS => self.parseInfixExpression(),
-            TokenType.MINUS => self.parseInfixExpression(),
-            TokenType.ASTERISK => self.parseInfixExpression(),
-            TokenType.SLASH => self.parseInfixExpression(),
+    fn infix(self: *Self, left: *ast.Expression) ?ast.Expression {
+        return switch (self.currentToken.kind) {
+            TokenType.EQ => self.parseInfixExpression(left),
+            TokenType.NOT_EQ => self.parseInfixExpression(left),
+            TokenType.LT => self.parseInfixExpression(left),
+            TokenType.GT => self.parseInfixExpression(left),
+            TokenType.PLUS => self.parseInfixExpression(left),
+            TokenType.MINUS => self.parseInfixExpression(left),
+            TokenType.ASTERISK => self.parseInfixExpression(left),
+            TokenType.SLASH => self.parseInfixExpression(left),
             else => blk: {
-                const message: []u8 = std.fmt.allocPrint(self.allocator, "No infix parse function for {any}", .{tokenType}) catch {
-                    @panic("Error occured attempting to create error message inside infix()");
-                };
-                self.appendError(message);
+                self.generateParseError("infix", self.currentToken.kind);
                 break :blk null;
             },
-        }
+        };
     }
 
     fn parseExpression(self: *Self, precedence: Precedence) ?ast.Expression {
-        _ = precedence;
-        return self.prefix(self.currentToken.kind);
+        if (self.prefix(self.currentToken.kind)) |left| {
+            var leftExpr = left;
+            while (!self.peekTokenIs(TokenType.SEMICOLON) and !self.peekTokenIs(TokenType.EOF) and precedence.lessThan(self.peekPrecedence())) {
+                if (isOperator(self.peekToken.kind)) {
+                    self.nextToken();
+
+                    // create a pointer here to avoid using a pointer to lextExpr
+                    // which led me to create a self-referential infix expression (whoops)
+                    const pLeft = self.allocator.create(ast.Expression) catch unreachable;
+                    pLeft.* = leftExpr;
+                    // TODO: we may need to handle error cases when we don't have an infix from self.infix(pLeft);
+                    if (self.infix(pLeft)) |ifx| {
+                        leftExpr = ifx;
+                    }
+                } else {
+                    return leftExpr;
+                }
+            }
+
+            return leftExpr;
+        } else {
+            self.generateParseError("prefix", self.currentToken.kind);
+            return null;
+        }
+    }
+
+    fn generateParseError(self: *Self, errorType: []const u8, tokenType: TokenType) void {
+        const msg = std.fmt.allocPrint(self.allocator, "No {s} parse function for {any}\n", .{ errorType, tokenType }) catch unreachable;
+        self.appendError(msg);
     }
 
     fn parseIdentifier(self: *Self) ast.Expression {
@@ -225,16 +269,18 @@ const Parser = struct {
         return ast.Expression{ .prefixExpression = prefixExpr };
     }
 
-    fn parseInfixExpression(self: *Self, left: ast.Expression) ?ast.Expression {
-        var expr = ast.InfixExpression.init(self.allocator, self.currentToken, self.currentToken.literal, &left);
+    fn parseInfixExpression(self: *Self, left: *ast.Expression) ?ast.Expression {
+        var expr = ast.InfixExpression.init(self.allocator, self.currentToken, self.currentToken.literal, left);
 
         const precedence = self.currentPrecedence();
+
         self.nextToken();
+
         if (self.parseExpression(precedence)) |right| {
             expr.createRight(right) catch unreachable;
         }
 
-        return ast.Expresssion{ .infixExpression = expr };
+        return ast.Expression{ .infixExpression = expr };
     }
     fn peekPrecedence(self: Self) Precedence {
         return checkPrecedence(self.peekToken.kind);
@@ -399,27 +445,32 @@ test "prefix operators" {
     }
 }
 
+test "precedence comparisons" {
+    try std.testing.expect(Precedence.LOWEST.lessThan(Precedence.SUM));
+    try std.testing.expect(Precedence.SUM.greaterThan(Precedence.LOWEST));
+}
+
 const InfixTestData = struct {
     input: []const u8,
-    leftValue: i64,
+    leftValue: u64,
     operator: []const u8,
-    rightValue: i64,
+    rightValue: u64,
 
-    pub fn new(input: []const u8, leftValue: i64, operator: []const u8, rightValue: i64) InfixTestData {
+    pub fn new(input: []const u8, leftValue: u64, operator: []const u8, rightValue: u64) InfixTestData {
         return .{ .input = input, .leftValue = leftValue, .operator = operator, .rightValue = rightValue };
     }
 };
 
 test "infix operators" {
     const tests: [8]InfixTestData = .{
-        InfixTestData.new("5 + 5", 5, "+", 5),
-        InfixTestData.new("5 - 5", 5, "-", 5),
-        InfixTestData.new("5 * 5", 5, "*", 5),
-        InfixTestData.new("5 / 5", 5, "/", 5),
-        InfixTestData.new("5 < 5", 5, "<", 5),
-        InfixTestData.new("5 > 5", 5, ">", 5),
-        InfixTestData.new("5 == 5", 5, "==", 5),
-        InfixTestData.new("5 != 5", 5, "!=", 5),
+        InfixTestData.new("5 + 5;", 5, "+", 5),
+        InfixTestData.new("5 - 5;", 5, "-", 5),
+        InfixTestData.new("5 * 5;", 5, "*", 5),
+        InfixTestData.new("5 / 5;", 5, "/", 5),
+        InfixTestData.new("5 < 5;", 5, "<", 5),
+        InfixTestData.new("5 > 5;", 5, ">", 5),
+        InfixTestData.new("5 == 5;", 5, "==", 5),
+        InfixTestData.new("5 != 5;", 5, "!=", 5),
     };
 
     const allocator = std.testing.allocator;
@@ -430,8 +481,14 @@ test "infix operators" {
         var program = try parser.parseProgram();
         defer parser.deinit();
         defer program.deinit();
+
         try checkParserErrors(&parser);
 
         try std.testing.expectEqual(1, program.statements.items.len);
+
+        const exp = program.statements.items[0].expressionStatement.expression.?.infixExpression;
+        try std.testing.expectEqual(t.leftValue, exp.left.?.integerLiteral.value);
+        try std.testing.expectEqual(t.operator, exp.operator);
+        try std.testing.expectEqual(t.rightValue, exp.right.?.integerLiteral.value);
     }
 }

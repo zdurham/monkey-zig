@@ -138,6 +138,7 @@ pub const PrefixExpression = struct {
 
 pub const InfixExpression = struct {
     const Self = @This();
+    allocator: mem.Allocator,
     token: lexer.Token,
     left: ?*Expression = undefined,
     operator: []const u8,
@@ -161,6 +162,12 @@ pub const InfixExpression = struct {
             self.allocator.destroy(right.*);
             self.right = null;
         }
+
+        if (self.left) |*left| {
+            left.*.deinit();
+            self.allocator.destroy(left.*);
+            self.left = null;
+        }
     }
 
     pub fn createRight(self: *Self, expression: Expression) anyerror!void {
@@ -175,17 +182,17 @@ pub const InfixExpression = struct {
         return self.token.literal;
     }
 
-    pub fn toString(self: *Self, writer: anytype) anyerror!void {
+    pub fn toString(self: Self, writer: anytype) anyerror!void {
         _ = try writer.write("(");
         if (self.left) |left| {
-            try left.*.toString(writer);
+            try left.toString(writer);
         }
         _ = try writer.write(" ");
         _ = try writer.write(self.operator);
         _ = try writer.write(" ");
 
         if (self.right) |right| {
-            try right.*.toString(writer);
+            try right.toString(writer);
         }
         _ = try writer.write(")");
     }

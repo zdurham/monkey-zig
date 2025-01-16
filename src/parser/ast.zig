@@ -34,12 +34,12 @@ pub const LetStatement = struct {
 
 pub const ReturnStatement = struct {
     token: lexer.Token,
-    returnValue: ?Expression = undefined,
+    value: ?Expression = undefined,
 
     pub fn deinit(self: *ReturnStatement) void {
-        if (self.returnValue) |*expr| {
+        if (self.value) |*expr| {
             expr.deinit();
-            self.returnValue = null;
+            self.value = null;
         }
     }
 
@@ -50,7 +50,7 @@ pub const ReturnStatement = struct {
     pub fn toString(self: ReturnStatement, writer: anytype) anyerror!void {
         _ = try writer.write(self.token.literal);
         _ = try writer.write(" ");
-        if (self.returnValue) |rValue| {
+        if (self.value) |rValue| {
             try rValue.toString(writer);
         }
         _ = try writer.write(";");

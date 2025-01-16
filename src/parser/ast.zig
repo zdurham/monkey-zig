@@ -87,6 +87,21 @@ pub const IntegerLiteral = struct {
     }
 };
 
+pub const Boolean = struct {
+    token: lexer.Token,
+    value: bool,
+
+    pub fn deinit(_: Boolean) void {}
+
+    pub fn tokenLiteral(self: *const Boolean) anyerror!void {
+        return self.token.literal;
+    }
+
+    pub fn toString(self: *const Boolean, writer: anytype) anyerror!void {
+        _ = try writer.write(self.token.literal);
+    }
+};
+
 pub const PrefixExpression = struct {
     const Self = @This();
     allocator: mem.Allocator,
@@ -198,9 +213,10 @@ pub const InfixExpression = struct {
 pub const Expression = union(enum) {
     const Self = @This();
     identifier: Identifier,
+    boolean: Boolean,
+    infixExpression: InfixExpression,
     integerLiteral: IntegerLiteral,
     prefixExpression: PrefixExpression,
-    infixExpression: InfixExpression,
 
     pub fn deinit(self: *Self) void {
         switch (self.*) {

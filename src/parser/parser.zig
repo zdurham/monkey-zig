@@ -185,6 +185,8 @@ const Parser = struct {
             TokenType.INT => self.parseIntegerLiteral(),
             TokenType.BANG => self.parsePrefixExpression(),
             TokenType.MINUS => self.parsePrefixExpression(),
+            TokenType.TRUE => self.parseBoolean(),
+            TokenType.FALSE => self.parseBoolean(),
             else => blk: {
                 self.generateParseError("prefix", tokenType);
                 break :blk null;
@@ -264,7 +266,6 @@ const Parser = struct {
         var prefixExpr = ast.PrefixExpression.init(self.allocator, self.currentToken, self.currentToken.literal);
 
         self.nextToken();
-        // create a pointer to the
         if (self.parseExpression(Precedence.PREFIX)) |expr| {
             prefixExpr.createRight(expr) catch unreachable;
         }
@@ -285,6 +286,14 @@ const Parser = struct {
 
         return ast.Expression{ .infixExpression = expr };
     }
+
+    fn parseBoolean(self: *Self) ast.Expression {
+        return ast.Expression{ .boolean = ast.Boolean{
+            .token = self.currentToken,
+            .value = self.currentTokenIs(TokenType.TRUE),
+        } };
+    }
+
     fn peekPrecedence(self: Self) Precedence {
         return checkPrecedence(self.peekToken.kind);
     }
@@ -453,27 +462,41 @@ test "precedence comparisons" {
     try std.testing.expect(Precedence.SUM.greaterThan(Precedence.LOWEST));
 }
 
-const InfixTestData = struct {
-    input: []const u8,
-    leftValue: u64,
-    operator: []const u8,
-    rightValue: u64,
+fn InfixTestData(comptime T: type) type {
+    return struct {
+        const Self = @This();
+        input: []const u8,
+        leftValue: T,
+        operator: []const u8,
+        rightValue: T,
 
-    pub fn new(input: []const u8, leftValue: u64, operator: []const u8, rightValue: u64) InfixTestData {
-        return .{ .input = input, .leftValue = leftValue, .operator = operator, .rightValue = rightValue };
-    }
-};
+        pub fn new(input: []const u8, leftValue: T, operator: []const u8, rightValue: T) Self {
+            return .{ .input = input, .leftValue = leftValue, .operator = operator, .rightValue = rightValue };
+        }
+    };
+}
+
+fn checkExpressionValue(expression: ast.Expression, expected: anytype) !void {
+    const value = switch (expression) {
+        .boolean => |expr| expr.value,
+        .integerLiteral => |expr| expr.value,
+    };
+    try std.testing.expectEqual(expected, value);
+}
 
 test "infix operators" {
-    const tests: [8]InfixTestData = .{
-        InfixTestData.new("5 + 5;", 5, "+", 5),
-        InfixTestData.new("5 - 5;", 5, "-", 5),
-        InfixTestData.new("5 * 5;", 5, "*", 5),
-        InfixTestData.new("5 / 5;", 5, "/", 5),
-        InfixTestData.new("5 < 5;", 5, "<", 5),
-        InfixTestData.new("5 > 5;", 5, ">", 5),
-        InfixTestData.new("5 == 5;", 5, "==", 5),
-        InfixTestData.new("5 != 5;", 5, "!=", 5),
+    const tests: [11]InfixTestData = .{
+        InfixTestData(u64).new("5 + 5;", 5, "+", 5),
+        InfixTestData(u64).new("5 - 5;", 5, "-", 5),
+        InfixTestData(u64).new("5 * 5;", 5, "*", 5),
+        InfixTestData(u64).new("5 / 5;", 5, "/", 5),
+        InfixTestData(u64).new("5 < 5;", 5, "<", 5),
+        InfixTestData(u64).new("5 > 5;", 5, ">", 5),
+        InfixTestData(u64).new("5 == 5;", 5, "==", 5),
+        InfixTestData(u64).new("5 != 5;", 5, "!=", 5),
+        InfixTestData(bool).new("true == true", true, "==", true),
+        InfixTestData(bool).new("true != false", true, "!=", false),
+        InfixTestData(bool).new("false == false", false, "==", false),
     };
 
     const allocator = std.testing.allocator;
@@ -490,15 +513,15 @@ test "infix operators" {
         try std.testing.expectEqual(1, program.statements.items.len);
 
         const exp = program.statements.items[0].expressionStatement.expression.?.infixExpression;
-        try std.testing.expectEqual(t.leftValue, exp.left.?.integerLiteral.value);
+        try checkExpressionValue(exp.left.?, t.leftValue);
         try std.testing.expectEqual(t.operator, exp.operator);
-        try std.testing.expectEqual(t.rightValue, exp.right.?.integerLiteral.value);
+        try checkExpressionValue(exp.right.?, t.rightValue);
     }
 }
 
 test "operator precedence parsing" {
     const PrecdenceTestData = struct { input: []const u8, output: []const u8 };
-    const tests: [11]PrecdenceTestData = .{
+    const tests = [_]PrecdenceTestData{
         PrecdenceTestData{ .input = "-a * b", .output = "((-a) * b)" },
         PrecdenceTestData{ .input = "!-a", .output = "(!(-a))" },
         PrecdenceTestData{ .input = "a + b +c", .output = "((a + b) + c)" },
@@ -510,6 +533,10 @@ test "operator precedence parsing" {
         PrecdenceTestData{ .input = "5 > 4 == 3 < 4", .output = "((5 > 4) == (3 < 4))" },
         PrecdenceTestData{ .input = "5 < 4 != 3 > 4", .output = "((5 < 4) != (3 > 4))" },
         PrecdenceTestData{ .input = "3 + 4 * 5 == 3 * 1 + 4 * 5", .output = "((3 + (4 * 5)) == ((3 * 1) + (4 * 5)))" },
+        PrecdenceTestData{ .input = "true", .output = "true" },
+        PrecdenceTestData{ .input = "false", .output = "false" },
+        PrecdenceTestData{ .input = "3 > 5 == false", .output = "((3 > 5) == false)" },
+        PrecdenceTestData{ .input = "3 < 5 == true", .output = "((3 < 5) == true)" },
     };
 
     const allocator = std.testing.allocator;

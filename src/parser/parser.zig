@@ -82,9 +82,8 @@ const Parser = struct {
     pub fn parseProgram(self: *Self) !ast.Program {
         var program = ast.Program.init(self.allocator);
         while (!self.currentTokenIs(TokenType.EOF)) {
-            const statement = self.parseStatement();
-            if (statement) |s| {
-                try program.statements.append(s);
+            if (self.parseStatement()) |stmt| {
+                try program.statements.append(stmt);
             }
             self.nextToken();
         }
@@ -140,8 +139,6 @@ const Parser = struct {
     fn nextToken(self: *Self) void {
         self.currentToken = self.peekToken;
         self.peekToken = self.lexer.nextToken();
-        // print("currentToken in nextToken: {any} {s}\n", .{ self.currentToken.kind, self.currentToken.literal });
-        // print("peekToken in nextToken: {any} {s}\n", .{ self.peekToken.kind, self.peekToken.literal });
     }
 
     fn currentTokenIs(self: *Self, kind: TokenType) bool {
@@ -193,6 +190,8 @@ const Parser = struct {
             TokenType.MINUS => self.parsePrefixExpression(),
             TokenType.TRUE => self.parseBoolean(),
             TokenType.FALSE => self.parseBoolean(),
+            TokenType.LPAREN => self.parseGroupedExpression(),
+            TokenType.IF => self.parseIfExpression(),
             else => blk: {
                 self.generateParseError("prefix", tokenType);
                 break :blk null;
@@ -220,7 +219,7 @@ const Parser = struct {
     fn parseExpression(self: *Self, precedence: Precedence) ?ast.Expression {
         if (self.prefix(self.currentToken.kind)) |left| {
             var leftExpr = left;
-            while (!self.peekTokenIs(TokenType.SEMICOLON) and !self.peekTokenIs(TokenType.EOF) and precedence.lessThan(self.peekPrecedence())) {
+            while (!(self.peekTokenIs(TokenType.SEMICOLON) or self.peekTokenIs(TokenType.EOF)) and precedence.lessThan(self.peekPrecedence())) {
                 if (isOperator(self.peekToken.kind)) {
                     self.nextToken();
 
@@ -244,6 +243,16 @@ const Parser = struct {
             self.generateParseError("prefix", self.currentToken.kind);
             return null;
         }
+    }
+
+    fn parseGroupedExpression(self: *Self) ?ast.Expression {
+        self.nextToken();
+        const expr = self.parseExpression(Precedence.LOWEST);
+        if (!self.expectPeek(TokenType.RPAREN)) {
+            return null;
+        }
+
+        return expr;
     }
 
     fn generateParseError(self: *Self, errorType: []const u8, tokenType: TokenType) void {
@@ -271,6 +280,7 @@ const Parser = struct {
         var prefixExpr = ast.PrefixExpression.init(self.allocator, self.currentToken, self.currentToken.literal);
 
         self.nextToken();
+
         if (self.parseExpression(Precedence.PREFIX)) |expr| {
             prefixExpr.createRight(expr) catch unreachable;
         }
@@ -282,7 +292,6 @@ const Parser = struct {
         var expr = ast.InfixExpression.init(self.allocator, self.currentToken, self.currentToken.literal, left);
 
         const precedence = self.currentPrecedence();
-
         self.nextToken();
 
         if (self.parseExpression(precedence)) |right| {
@@ -297,6 +306,53 @@ const Parser = struct {
             .token = self.currentToken,
             .value = self.currentTokenIs(TokenType.TRUE),
         } };
+    }
+
+    fn parseIfExpression(self: *Self) ?ast.Expression {
+        var ifExpr = ast.IfExpression.init(self.allocator, self.currentToken);
+
+        if (!self.expectPeek(TokenType.LPAREN)) {
+            return null;
+        }
+        self.nextToken();
+
+        // parse condition expression
+        if (self.parseExpression(Precedence.LOWEST)) |condition| {
+            ifExpr.createCondition(condition) catch unreachable;
+        }
+
+        if (!self.expectPeek(TokenType.RPAREN)) {
+            return null;
+        }
+
+        if (!self.expectPeek(TokenType.LBRACE)) {
+            return null;
+        }
+
+        ifExpr.createConsequence(self.parseBlock()) catch unreachable;
+
+        if (self.peekTokenIs(TokenType.ELSE)) {
+            self.nextToken();
+
+            if (!self.expectPeek(TokenType.LBRACE)) {
+                return null;
+            }
+
+            ifExpr.createAlternative(self.parseBlock()) catch unreachable;
+        }
+        return ast.Expression{ .ifExpression = ifExpr };
+    }
+
+    fn parseBlock(self: *Self) ast.Block {
+        var block = ast.Block.init(self.allocator, self.currentToken);
+        self.nextToken();
+        while (!self.currentTokenIs(TokenType.RBRACE) and !self.currentTokenIs(TokenType.EOF)) {
+            if (self.parseStatement()) |stmt| {
+                block.statements.append(stmt) catch unreachable;
+            }
+            self.nextToken();
+        }
+        return block;
     }
 
     fn peekPrecedence(self: Self) Precedence {
@@ -499,7 +555,7 @@ test "infix operators" {
         InfixTestData(u64).new("5 == 5;", 5, "==", 5),
         InfixTestData(u64).new("5 != 5;", 5, "!=", 5),
     };
-    // TODO: implement these tests...
+    // TODO: implement these tests...but in a reusable way
     // const boolTests = [_]InfixTestData(bool){
     //     InfixTestData(bool).new("true == true", true, "==", true),
     //     InfixTestData(bool).new("true != false", true, "!=", false),
@@ -587,6 +643,11 @@ test "operator precedence parsing" {
         TestData.new("false", "false"),
         TestData.new("3 > 5 == false", "((3 > 5) == false)"),
         TestData.new("3 < 5 == true", "((3 < 5) == true)"),
+        TestData.new("1 + (2 + 3) + 4", "((1 + (2 + 3)) + 4)"),
+        TestData.new("(5 + 5) * 2", "((5 + 5) * 2)"),
+        TestData.new("2 / (5 + 5)", "(2 / (5 + 5))"),
+        TestData.new("-(5 + 5)", "(-(5 + 5))"),
+        TestData.new("!(true == true)", "(!(true == true))"),
     };
 
     try testProgram(&tests);
@@ -599,4 +660,53 @@ test "boolean literals" {
     };
 
     try testProgram(&tests);
+}
+
+fn getProgram(allocator: mem.Allocator, input: []const u8) !ast.Program {
+    var l = lexer.Lexer.init(input);
+    var parser = Parser.init(allocator, &l);
+    var program = try parser.parseProgram();
+    defer parser.deinit();
+    errdefer program.deinit();
+    try checkParserErrors(&parser);
+    return program;
+}
+
+test "if expression" {
+    const input = "if (x < y) { x }";
+    const allocator = std.testing.allocator;
+    var program = try getProgram(allocator, input);
+    defer program.deinit();
+    try std.testing.expectEqual(1, program.statements.items.len);
+
+    const ifStatement = program.statements.items[0].expressionStatement.expression.?.ifExpression;
+    const condition = ifStatement.condition.?;
+    try std.testing.expectEqualStrings("x", condition.infixExpression.left.?.identifier.value);
+    try std.testing.expectEqualStrings("<", condition.infixExpression.operator);
+    try std.testing.expectEqualStrings("y", condition.infixExpression.right.?.identifier.value);
+
+    const consequence = ifStatement.consequence.?;
+    try std.testing.expectEqualStrings("x", consequence.statements.items[0].expressionStatement.expression.?.identifier.value);
+
+    try std.testing.expect(null == ifStatement.alternative);
+}
+
+test "if else expression" {
+    const input = "if (x < y) { x } else { y }";
+    const allocator = std.testing.allocator;
+    var program = try getProgram(allocator, input);
+    defer program.deinit();
+    try std.testing.expectEqual(1, program.statements.items.len);
+
+    const ifStatement = program.statements.items[0].expressionStatement.expression.?.ifExpression;
+    const condition = ifStatement.condition.?;
+    try std.testing.expectEqualStrings("x", condition.infixExpression.left.?.identifier.value);
+    try std.testing.expectEqualStrings("<", condition.infixExpression.operator);
+    try std.testing.expectEqualStrings("y", condition.infixExpression.right.?.identifier.value);
+
+    const consequence = ifStatement.consequence.?;
+    try std.testing.expectEqualStrings("x", consequence.statements.items[0].expressionStatement.expression.?.identifier.value);
+
+    const alternative = ifStatement.alternative.?;
+    try std.testing.expectEqualStrings("y", alternative.statements.items[0].expressionStatement.expression.?.identifier.value);
 }

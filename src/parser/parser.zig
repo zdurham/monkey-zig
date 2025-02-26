@@ -192,6 +192,8 @@ const Parser = struct {
             TokenType.FALSE => self.parseBoolean(),
             TokenType.LPAREN => self.parseGroupedExpression(),
             TokenType.IF => self.parseIfExpression(),
+            TokenType.FUNCTION => self.parseFunctionLiteral(),
+
             else => blk: {
                 self.generateParseError("prefix", tokenType);
                 break :blk null;
@@ -322,10 +324,12 @@ const Parser = struct {
         }
 
         if (!self.expectPeek(TokenType.RPAREN)) {
+            ifExpr.deinit();
             return null;
         }
 
         if (!self.expectPeek(TokenType.LBRACE)) {
+            ifExpr.deinit();
             return null;
         }
 
@@ -335,12 +339,57 @@ const Parser = struct {
             self.nextToken();
 
             if (!self.expectPeek(TokenType.LBRACE)) {
+                ifExpr.deinit();
                 return null;
             }
 
             ifExpr.createAlternative(self.parseBlock()) catch unreachable;
         }
         return ast.Expression{ .ifExpression = ifExpr };
+    }
+
+    fn parseFunctionLiteral(self: *Self) ?ast.Expression {
+        var funcLit = ast.FunctionLiteral.init(self.allocator, self.currentToken);
+
+        if (!self.expectPeek(TokenType.LPAREN)) {
+            funcLit.deinit();
+            return null;
+        }
+
+        self.parseFunctionParameters(&funcLit.parameters);
+
+        if (!self.expectPeek(TokenType.LBRACE)) {
+            funcLit.deinit();
+            return null;
+        }
+
+        funcLit.body = self.parseBlock();
+        return ast.Expression{ .functionLiteral = funcLit };
+    }
+
+    fn parseFunctionParameters(self: *Self, paramList: *std.ArrayList(ast.Identifier)) void {
+        if (self.peekTokenIs(TokenType.RPAREN)) {
+            self.nextToken();
+            return;
+        } else {
+            self.nextToken();
+
+            // first identifier
+            paramList.append(ast.Identifier{ .token = self.currentToken, .value = self.currentToken.literal }) catch unreachable;
+
+            // iterate through remaining params if they exist
+            while (self.peekTokenIs(TokenType.COMMA)) {
+                self.nextToken(); // curr token is comma
+                self.nextToken(); // curr token is param
+
+                paramList.append(ast.Identifier{ .token = self.currentToken, .value = self.currentToken.literal }) catch unreachable;
+            }
+        }
+
+        if (!self.expectPeek(TokenType.RPAREN)) {
+            // I guess deinit the param list if it's malformed
+            paramList.deinit();
+        }
     }
 
     fn parseBlock(self: *Self) ast.Block {
@@ -709,4 +758,52 @@ test "if else expression" {
 
     const alternative = ifStatement.alternative.?;
     try std.testing.expectEqualStrings("y", alternative.statements.items[0].expressionStatement.expression.?.identifier.value);
+}
+
+test "function literal" {
+    const input = "fn(x,y) { x + y; }";
+    const allocator = std.testing.allocator;
+    var program = try getProgram(allocator, input);
+    defer program.deinit();
+
+    try std.testing.expectEqual(1, program.statements.items.len);
+    const funcLiteral = program.statements.items[0].expressionStatement.expression.?.functionLiteral;
+
+    try std.testing.expectEqual(2, funcLiteral.parameters.items.len);
+    try std.testing.expectEqualStrings("x", funcLiteral.parameters.items[0].value);
+    try std.testing.expectEqualStrings("y", funcLiteral.parameters.items[1].value);
+
+    try std.testing.expectEqual(1, funcLiteral.body.?.statements.items.len);
+    const expr = funcLiteral.body.?.statements.items[0].expressionStatement.expression.?.infixExpression;
+
+    try std.testing.expectEqualStrings("x", expr.left.?.identifier.value);
+    try std.testing.expectEqualStrings("+", expr.operator);
+    try std.testing.expectEqualStrings("y", expr.right.?.identifier.value);
+}
+test "single func param" {
+    const input = "fn(x) { return x; }";
+    const allocator = std.testing.allocator;
+    var program = try getProgram(allocator, input);
+    defer program.deinit();
+    const funcLiteral = program.statements.items[0].expressionStatement.expression.?.functionLiteral;
+
+    try std.testing.expectEqual(1, funcLiteral.parameters.items.len);
+    try std.testing.expectEqualStrings("x", funcLiteral.parameters.items[0].value);
+}
+
+test "empty function params" {
+    const input = "fn() { 2 + 4; }";
+    const allocator = std.testing.allocator;
+    var program = try getProgram(allocator, input);
+    defer program.deinit();
+
+    try std.testing.expectEqual(1, program.statements.items.len);
+    const funcLiteral = program.statements.items[0].expressionStatement.expression.?.functionLiteral;
+
+    try std.testing.expectEqual(0, funcLiteral.parameters.items.len);
+    try std.testing.expectEqual(1, funcLiteral.body.?.statements.items.len);
+    const expr = funcLiteral.body.?.statements.items[0].expressionStatement.expression.?.infixExpression;
+    try std.testing.expectEqual(2, expr.left.?.integerLiteral.value);
+    try std.testing.expectEqualStrings("+", expr.operator);
+    try std.testing.expectEqual(4, expr.right.?.integerLiteral.value);
 }

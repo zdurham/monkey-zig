@@ -316,7 +316,7 @@ pub const FunctionLiteral = struct {
     allocator: Allocator,
     token: lexer.Token,
     parameters: std.ArrayList(Identifier),
-    body: ?*Block = null,
+    body: ?Block = null,
 
     pub fn init(allocator: Allocator, token: lexer.Token) Self {
         return Self{ .token = token, .allocator = allocator, .parameters = std.ArrayList(Identifier).init(allocator) };
@@ -326,7 +326,6 @@ pub const FunctionLiteral = struct {
         self.parameters.deinit();
         if (self.body) |body| {
             body.deinit();
-            self.allocator.destroy(body);
             self.body = null;
         }
     }
@@ -338,7 +337,7 @@ pub const FunctionLiteral = struct {
     pub fn toString(self: Self, writer: anytype) anyerror!void {
         // wow this is all so tedious here
         var strings = std.ArrayList([]const u8).init(self.allocator);
-        defer for (strings) |string| {
+        defer for (strings.items) |string| {
             self.allocator.free(string);
         };
         defer strings.deinit();
@@ -354,7 +353,7 @@ pub const FunctionLiteral = struct {
         _ = try writer.write(params);
         _ = try writer.write(")");
         if (self.body) |body| {
-            try body.toString();
+            try body.toString(writer);
         }
     }
 };
@@ -367,6 +366,7 @@ pub const Expression = union(enum) {
     integerLiteral: IntegerLiteral,
     prefixExpression: PrefixExpression,
     ifExpression: IfExpression,
+    functionLiteral: FunctionLiteral,
 
     pub fn deinit(self: *Self) void {
         switch (self.*) {

@@ -12,7 +12,7 @@ const Precedence = enum {
     PRODUCT, // *
     PREFIX, // -X or !X
     CALL, // myFunc(X)
-    //
+
     pub fn lessThan(self: Precedence, other: Precedence) bool {
         return @intFromEnum(self) < @intFromEnum(other);
     }
@@ -32,21 +32,8 @@ fn checkPrecedence(tokenType: TokenType) Precedence {
         TokenType.MINUS => Precedence.SUM,
         TokenType.ASTERISK => Precedence.PRODUCT,
         TokenType.SLASH => Precedence.PRODUCT,
+        TokenType.LPAREN => Precedence.CALL,
         else => Precedence.LOWEST,
-    };
-}
-
-fn isOperator(tokenType: TokenType) bool {
-    return switch (tokenType) {
-        TokenType.EQ => true,
-        TokenType.NOT_EQ => true,
-        TokenType.LT => true,
-        TokenType.GT => true,
-        TokenType.PLUS => true,
-        TokenType.MINUS => true,
-        TokenType.ASTERISK => true,
-        TokenType.SLASH => true,
-        else => false,
     };
 }
 
@@ -195,7 +182,7 @@ const Parser = struct {
             TokenType.FUNCTION => self.parseFunctionLiteral(),
 
             else => blk: {
-                self.generateParseError("prefix", tokenType);
+                self.generateParseError("prefix", tokenType, self.currentToken.literal);
                 break :blk null;
             },
         };
@@ -211,8 +198,9 @@ const Parser = struct {
             TokenType.MINUS => self.parseInfixExpression(left),
             TokenType.ASTERISK => self.parseInfixExpression(left),
             TokenType.SLASH => self.parseInfixExpression(left),
+            TokenType.LPAREN => self.parseCallExpression(left),
             else => blk: {
-                self.generateParseError("infix", self.currentToken.kind);
+                self.generateParseError("infix", self.currentToken.kind, self.currentToken.literal);
                 break :blk null;
             },
         };
@@ -222,27 +210,21 @@ const Parser = struct {
         if (self.prefix(self.currentToken.kind)) |left| {
             var leftExpr = left;
             while (!(self.peekTokenIs(TokenType.SEMICOLON) or self.peekTokenIs(TokenType.EOF)) and precedence.lessThan(self.peekPrecedence())) {
-                if (isOperator(self.peekToken.kind)) {
-                    self.nextToken();
-
-                    // create a pointer here to avoid using a pointer to lextExpr
-                    // which led me to create a self-referential infix expression (whoops)
-                    const pLeft = self.allocator.create(ast.Expression) catch unreachable;
-                    pLeft.* = leftExpr;
-                    // TODO: we may need to handle error cases when we don't have an infix from self.infix(pLeft);
-                    if (self.infix(pLeft)) |ifx| {
-                        leftExpr = ifx;
-                    } else {
-                        self.allocator.destroy(pLeft);
-                    }
+                self.nextToken();
+                // create a pointer here to avoid using a pointer to lextExpr
+                // which led me to create a self-referential infix expression (whoops)
+                const pLeft = self.allocator.create(ast.Expression) catch unreachable;
+                pLeft.* = leftExpr;
+                if (self.infix(pLeft)) |ifx| {
+                    leftExpr = ifx;
                 } else {
-                    return leftExpr;
+                    self.allocator.destroy(pLeft);
                 }
             }
 
             return leftExpr;
         } else {
-            self.generateParseError("prefix", self.currentToken.kind);
+            self.generateParseError("prefix", self.currentToken.kind, self.currentToken.literal);
             return null;
         }
     }
@@ -257,8 +239,8 @@ const Parser = struct {
         return expr;
     }
 
-    fn generateParseError(self: *Self, errorType: []const u8, tokenType: TokenType) void {
-        const msg = std.fmt.allocPrint(self.allocator, "No {s} parse function for {any}\n", .{ errorType, tokenType }) catch unreachable;
+    fn generateParseError(self: *Self, errorType: []const u8, tokenType: TokenType, tokenValue: []const u8) void {
+        const msg = std.fmt.allocPrint(self.allocator, "No {s} parse function for {any}: {s}\n", .{ errorType, tokenType, tokenValue }) catch unreachable;
         self.appendError(msg);
     }
 
@@ -387,8 +369,53 @@ const Parser = struct {
         }
 
         if (!self.expectPeek(TokenType.RPAREN)) {
-            // I guess deinit the param list if it's malformed
+            // TODO: probably need to deinit each item in list
+            // as well as the list itself
             paramList.deinit();
+        }
+    }
+
+    fn parseCallExpression(self: *Self, function: *ast.Expression) ?ast.Expression {
+        var callExpression = ast.CallExpression.init(
+            self.allocator,
+            self.currentToken,
+            function,
+        );
+        self.parseCallArguments(&callExpression.arguments) catch {
+            return null;
+        };
+
+        return ast.Expression{ .callExpression = callExpression };
+    }
+
+    fn parseCallArguments(self: *Self, arguments: *std.ArrayList(ast.Expression)) !void {
+        // empty arguments case
+        if (self.peekTokenIs(TokenType.RPAREN)) {
+            self.nextToken();
+            return;
+        }
+
+        // we have some arguments if the next token isn't RPAREN
+        self.nextToken();
+        // parse first expression
+        if (self.parseExpression(Precedence.LOWEST)) |expr| {
+            try arguments.append(expr);
+        }
+
+        // parse comma separated statements
+        while (self.peekTokenIs(TokenType.COMMA)) {
+            self.nextToken(); // move to comma
+            self.nextToken(); // move to token after comma
+            if (self.parseExpression(Precedence.LOWEST)) |expr| {
+                try arguments.append(expr);
+            }
+        }
+
+        if (!self.expectPeek(TokenType.RPAREN)) {
+            for (arguments.items) |*arg| {
+                arg.*.deinit();
+            }
+            arguments.deinit();
         }
     }
 
@@ -806,4 +833,43 @@ test "empty function params" {
     try std.testing.expectEqual(2, expr.left.?.integerLiteral.value);
     try std.testing.expectEqualStrings("+", expr.operator);
     try std.testing.expectEqual(4, expr.right.?.integerLiteral.value);
+}
+
+fn testExpressionLiteral(expected: []const u8, expr: ast.Expression) !void {
+    var output = std.ArrayList(u8).init(std.testing.allocator);
+    defer output.deinit();
+    try expr.toString(output.writer());
+    try std.testing.expectEqualStrings(expected, output.items);
+}
+
+test "call expressions" {
+    const input = "add(1, 2 * 3, 4 + 5);";
+    const allocator = std.testing.allocator;
+    var program = try getProgram(allocator, input);
+    defer program.deinit();
+
+    try std.testing.expectEqual(1, program.statements.items.len);
+
+    const callExpr = program.statements.items[0].expressionStatement.expression.?.callExpression;
+    try std.testing.expectEqualStrings("add", callExpr.function.identifier.value);
+    const arguments = callExpr.arguments.items;
+    try testExpressionLiteral("1", arguments[0]);
+    try testExpressionLiteral("(2 * 3)", arguments[1]);
+    try testExpressionLiteral("(4 + 5)", arguments[2]);
+}
+
+test "nested call expressions" {
+    const input = "add(1, add(2 * 3), 4 + 5);";
+    const allocator = std.testing.allocator;
+    var program = try getProgram(allocator, input);
+    defer program.deinit();
+
+    try std.testing.expectEqual(1, program.statements.items.len);
+
+    const callExpr = program.statements.items[0].expressionStatement.expression.?.callExpression;
+    try std.testing.expectEqualStrings("add", callExpr.function.identifier.value);
+    const arguments = callExpr.arguments.items;
+    try testExpressionLiteral("1", arguments[0]);
+    try testExpressionLiteral("add((2 * 3))", arguments[1]);
+    try testExpressionLiteral("(4 + 5)", arguments[2]);
 }

@@ -63,8 +63,8 @@ pub const Identifier = struct {
 
     pub fn deinit(_: Identifier) void {}
 
-    pub fn tokenLiteral(self: Identifier) anyerror!void {
-        return self.token.literal();
+    pub fn tokenLiteral(self: Identifier) []const u8 {
+        return self.token.literal;
     }
 
     pub fn toString(self: Identifier, writer: anytype) anyerror!void {
@@ -78,7 +78,7 @@ pub const IntegerLiteral = struct {
 
     pub fn deinit(_: IntegerLiteral) void {}
 
-    pub fn tokenLiteral(self: *const IntegerLiteral) anyerror!void {
+    pub fn tokenLiteral(self: *const IntegerLiteral) []const u8 {
         return self.token.literal;
     }
 
@@ -93,7 +93,7 @@ pub const Boolean = struct {
 
     pub fn deinit(_: Boolean) void {}
 
-    pub fn tokenLiteral(self: *const Boolean) anyerror!void {
+    pub fn tokenLiteral(self: *const Boolean) []const u8 {
         return self.token.literal;
     }
 
@@ -136,7 +136,7 @@ pub const PrefixExpression = struct {
         self.right.?.* = expression;
     }
 
-    pub fn tokenLiteral(self: *Self) anyerror!void {
+    pub fn tokenLiteral(self: Self) []const u8 {
         return self.token.literal;
     }
 
@@ -358,6 +358,46 @@ pub const FunctionLiteral = struct {
     }
 };
 
+pub const CallExpression = struct {
+    const Self = @This();
+    token: lexer.Token, // this is (
+    function: *Expression,
+    arguments: std.ArrayList(Expression),
+    allocator: Allocator,
+
+    pub fn init(allocator: Allocator, token: lexer.Token, function: *Expression) Self {
+        return Self{
+            .token = token,
+            .allocator = allocator,
+            .function = function,
+            .arguments = std.ArrayList(Expression).init(allocator),
+        };
+    }
+
+    pub fn deinit(self: *Self) void {
+        self.function.deinit();
+        self.allocator.destroy(self.function);
+
+        for (self.arguments.items) |*expr| {
+            expr.*.deinit();
+        }
+        self.arguments.deinit();
+    }
+
+    pub fn toString(self: Self, writer: anytype) anyerror!void {
+        try self.function.toString(writer);
+        _ = try writer.write("(");
+        for (self.arguments.items) |item| {
+            try item.toString(writer);
+        }
+        _ = try writer.write(")");
+    }
+
+    pub fn tokenLiteral(self: Self) []const u8 {
+        return self.token.literal;
+    }
+};
+
 pub const Expression = union(enum) {
     const Self = @This();
     identifier: Identifier,
@@ -367,6 +407,7 @@ pub const Expression = union(enum) {
     prefixExpression: PrefixExpression,
     ifExpression: IfExpression,
     functionLiteral: FunctionLiteral,
+    callExpression: CallExpression,
 
     pub fn deinit(self: *Self) void {
         switch (self.*) {
@@ -378,6 +419,12 @@ pub const Expression = union(enum) {
         switch (self) {
             inline else => |expr| try expr.toString(writer),
         }
+    }
+
+    pub fn tokenLiteral(self: Self) []const u8 {
+        return switch (self) {
+            inline else => |expr| expr.tokenLiteral(),
+        };
     }
 };
 

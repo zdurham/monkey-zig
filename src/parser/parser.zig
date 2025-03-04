@@ -37,7 +37,7 @@ fn checkPrecedence(tokenType: TokenType) Precedence {
     };
 }
 
-const Parser = struct {
+pub const Parser = struct {
     const Self = @This();
     lexer: *lexer.Lexer,
     allocator: mem.Allocator,
@@ -459,7 +459,7 @@ fn checkParserErrors(parser: *Parser) !void {
     try std.testing.expect(errors.len == 0);
 }
 
-test "Test let statements" {
+test "let statements" {
     const allocator = std.testing.allocator;
     const input =
         \\let x = 5;
@@ -475,7 +475,7 @@ test "Test let statements" {
     try std.testing.expectEqual(3, program.statements.items.len);
 }
 
-test "test return statements" {
+test "return statements" {
     const input =
         \\return 5;
         \\return 10;

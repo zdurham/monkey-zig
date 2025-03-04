@@ -387,8 +387,11 @@ pub const CallExpression = struct {
     pub fn toString(self: Self, writer: anytype) anyerror!void {
         try self.function.toString(writer);
         _ = try writer.write("(");
-        for (self.arguments.items) |item| {
+        for (self.arguments.items, 0..) |item, idx| {
             try item.toString(writer);
+            if (idx != self.arguments.items.len - 1) {
+                _ = try writer.write(", ");
+            }
         }
         _ = try writer.write(")");
     }
